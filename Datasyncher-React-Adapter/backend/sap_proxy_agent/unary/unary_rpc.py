@@ -158,11 +158,14 @@ class GCPTokenBrokerService(service_pb2_grpc.GCPTokenBrokerServiceServicer):
                 expires_in=expires_in,
                 error_message="",
             )
-        except Exception:
+        except Exception as exc:
             logger.exception("GetDownscopedToken failed")
+            detail = str(exc).strip().replace("\n", " ")[:240]
+            if not detail:
+                detail = exc.__class__.__name__
             context.abort(
                 grpc.StatusCode.INTERNAL,
-                "Unable to generate GCP downscoped token",
+                f"Unable to generate GCP downscoped token: {detail}",
             )
 
 

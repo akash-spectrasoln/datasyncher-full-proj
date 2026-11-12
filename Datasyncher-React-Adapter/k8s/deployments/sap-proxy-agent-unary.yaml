@@ -50,6 +50,18 @@ spec:
               value: "50053"
             - name: UNARY_RPC_MTLS_DIR
               value: /etc/sap-proxy-agent-unary/mtls
+            # Alias batch secret keys for GetDownscopedToken (code also falls
+            # back to GCP_PROJECT_ID / GCS_BUCKET_NAME from envFrom).
+            - name: PROXY_AGENT_GCP_PROJECT
+              valueFrom:
+                secretKeyRef:
+                  name: datasyncher-secrets
+                  key: GCP_PROJECT_ID
+            - name: PROXY_AGENT_GCS_BUCKET
+              valueFrom:
+                secretKeyRef:
+                  name: datasyncher-secrets
+                  key: GCS_BUCKET_NAME
           envFrom:
             - secretRef:
                 name: datasyncher-secrets
