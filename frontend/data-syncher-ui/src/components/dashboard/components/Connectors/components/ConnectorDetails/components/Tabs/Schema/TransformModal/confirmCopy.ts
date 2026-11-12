@@ -79,11 +79,11 @@ export const confirmCopy = {
     ],
   },
   saveWithoutTest: {
-    title: "Validate without a dry run?",
+    title: "Apply without a dry run?",
     description:
-      "The mapping and script have not been dry-run tested. Validate still checks syntax and mapping; runtime errors may appear when the pipeline runs.",
+      "The mapping and script have not been dry-run tested. Apply still checks syntax and mapping; runtime errors may appear when the pipeline runs.",
     cancelLabel: "Go back",
-    confirmLabel: "Validate",
+    confirmLabel: "Apply",
   },
   restoreDraft: {
     title: "Restore local draft?",
@@ -93,10 +93,13 @@ export const confirmCopy = {
     confirmLabel: "Restore draft",
   },
   saved: (version: number) => `Draft saved (version ${version})`,
-  published: (version: number) => `Validated version ${version}`,
-  validated: (version: number) => `Validated v${version}`,
+  published: (version: number) => `Applied (v${version})`,
+  validated: (version: number) => `Applied v${version}`,
   draftBadge: "Draft",
-  validatedBadge: (version: number) => `Validated v${version}`,
+  validatedBadge: (version: number) => `Applied v${version}`,
+  applyFailed: "Apply failed",
+  applyIncomplete:
+    "Checks passed but the transform was not activated for loads.",
   removed: (name: string) => `${name} removed`,
   copied: "Copied",
   scriptValidated: "Python syntax valid",

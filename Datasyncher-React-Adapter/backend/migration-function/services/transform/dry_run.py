@@ -220,6 +220,10 @@ def _result_payload(
             "status": status_counts,
         },
         "mapping_table": table,
+        "source_preview": input_df.head(preview_rows).to_dict(orient="records")
+        if rows_in
+        else [],
+        "source_columns": [str(column) for column in input_df.columns],
         "input_preview": input_preview_df.head(preview_rows).to_dict(orient="records")
         if len(input_preview_df)
         else [],

@@ -114,6 +114,8 @@ def test_dry_run_preview_keeps_mapped_columns_only():
     )
     assert result["errors"] == []
     assert list(result["input_preview"][0]) == ["FISCPER"]
+    assert "UNSELECTED" in result["source_preview"][0]
+    assert "FISCPER" in result["source_preview"][0]
     assert list(result["output_preview"][0]) == ["FISCPER", "FISCPER_2"]
     assert result["output_preview"][0]["FISCPER"] == "2024001"
     assert result["output_preview"][0]["FISCPER_2"] == "2024001"

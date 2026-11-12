@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, Optional, Sequence
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 import pandas as pd
 from fastapi import APIRouter, HTTPException
@@ -15,7 +15,8 @@ from services.snowflake.as_source.to_sftp import (
     _extract_snowflake_schema,
 )
 from services.snowflake.service import SnowflakeService
-from services.transform.script_runner import ScriptRuntimeError
+from services.transform.schema_output_policy import schema_mismatch_errors_from_column_lists
+from services.transform.script_runner import ScriptRuntimeError, effective_script_text
 from services.transform.source_script_transform import (
     TransformingCursor,
     dataframe_from_rows,
@@ -45,20 +46,145 @@ class SampleCursor:
 class SourceScriptValidateRequest(BaseModel):
     script_text: str = ""
     entry_point: str = ""
+    destination_is_file_based: bool = True
+    expected_columns: Optional[List[str]] = None
+    source_config: Dict[str, Any] = Field(default_factory=dict)
+    table_name: str = ""
+    selected_fields: Optional[List[str]] = None
+    sort_columns: Optional[List[Any]] = None
+    sample_size: int = 100
 
 
 class SnowflakeScriptDryRunRequest(SourceScriptValidateRequest):
-    source_config: Dict[str, Any] = Field(default_factory=dict)
-    table_name: str
-    selected_fields: Optional[list[str]] = None
-    sort_columns: Optional[list[Any]] = None
-    sample_size: int = 100
+    pass
+
+
+def _snowflake_script_output_columns(
+    source_config: Dict[str, Any],
+    table_name: str,
+    *,
+    script_text: str,
+    entry_point: str,
+    selected_fields: Optional[List[str]],
+    sort_columns: Optional[List[Any]],
+    sample_size: int,
+) -> Tuple[List[str], List[str]]:
+    """Return input and output column names from a bounded Snowflake sample."""
+    limit = max(1, min(int(sample_size or 100), 1000))
+    service = SnowflakeService(
+        source_config,
+        destination_schema=None,
+        validate_destination_schema=False,
+    )
+    connection = None
+    try:
+        connection = service.create_connection()
+        schema_name = _extract_snowflake_schema(source_config)
+        if schema_name:
+            with connection.cursor() as schema_cursor:
+                schema_cursor.execute(f"USE SCHEMA {schema_name}")
+        base_query = _build_snowflake_select_query(
+            table_name,
+            selected_fields or [],
+            sort_columns,
+        )
+        query = f"{base_query.rstrip(';')} LIMIT {limit}"
+        with connection.cursor() as cursor:
+            cursor.execute(query)
+            input_columns = [item[0] for item in (cursor.description or [])]
+            rows = cursor.fetchmany(limit)
+        sample_batch_size = max(1, min(100, (limit // 2) or 1))
+        transformed_cursor = TransformingCursor(
+            SampleCursor(input_columns, rows),
+            fetch_size=sample_batch_size,
+            script_text=script_text,
+            entry_point=entry_point,
+        )
+        output_columns = [item[0] for item in transformed_cursor.description]
+        while transformed_cursor.fetchmany(sample_batch_size):
+            pass
+        return list(input_columns), [str(column) for column in output_columns]
+    finally:
+        if connection is not None:
+            try:
+                connection.close()
+            except Exception:
+                logger.warning(
+                    "Unable to close Snowflake validate connection | table=%s",
+                    table_name,
+                    exc_info=True,
+                )
 
 
 @router.post("/validate")
 def validate_source_script_route(request: SourceScriptValidateRequest):
-    """Validate only; this endpoint never connects to a source or executes code."""
-    return validate_source_script(request.script_text, request.entry_point)
+    """Validate syntax; for database destinations, also enforce locked output columns."""
+    result = validate_source_script(request.script_text, request.entry_point)
+    if (
+        request.destination_is_file_based
+        or not result.get("valid")
+        or not effective_script_text(request.script_text)
+    ):
+        return result
+
+    if not request.table_name or not request.source_config:
+        result["valid"] = False
+        result.setdefault("errors", []).append(
+            {
+                "path": "source_config",
+                "message": (
+                    "Database destination validation requires Snowflake source "
+                    "configuration and table name."
+                ),
+            }
+        )
+        return result
+
+    try:
+        input_columns, output_columns = _snowflake_script_output_columns(
+            request.source_config,
+            request.table_name,
+            script_text=request.script_text,
+            entry_point=request.entry_point,
+            selected_fields=request.selected_fields,
+            sort_columns=request.sort_columns,
+            sample_size=request.sample_size,
+        )
+    except ScriptRuntimeError as exc:
+        result["valid"] = False
+        result.setdefault("errors", []).append(
+            {
+                "path": f"script:{exc.line or 0}",
+                "message": str(exc),
+                "traceback": exc.traceback_text,
+                "type": "script_error",
+            }
+        )
+        return result
+    except Exception as exc:
+        logger.exception(
+            "Snowflake source script validate failed | table=%s", request.table_name
+        )
+        result["valid"] = False
+        result.setdefault("errors", []).append(
+            {
+                "path": "source_config",
+                "message": (
+                    "Could not verify routine output against the destination schema. "
+                    "Check Snowflake connectivity and try again."
+                ),
+            }
+        )
+        return result
+
+    expected = list(request.expected_columns or request.selected_fields or input_columns)
+    schema_errors = schema_mismatch_errors_from_column_lists(
+        output_columns, expected
+    )
+    if schema_errors:
+        result["valid"] = False
+        result.setdefault("errors", []).extend(schema_errors)
+    return result
 
 
 @router.post("/snowflake/dry-run")
@@ -76,20 +202,17 @@ def dry_run_snowflake_script(request: SnowflakeScriptDryRunRequest):
         }
 
     limit = max(1, min(int(request.sample_size or 100), 1000))
-    service = SnowflakeService(
-        request.source_config,
-        destination_schema=None,
-        validate_destination_schema=False,
-    )
+    sample_batch_size = max(1, min(100, (limit // 2) or 1))
     connection = None
     try:
+        service = SnowflakeService(
+            request.source_config,
+            destination_schema=None,
+            validate_destination_schema=False,
+        )
         connection = service.create_connection()
         schema_name = _extract_snowflake_schema(request.source_config)
         if schema_name:
-            # create_connection selects the database, but not the source schema.
-            # The migration export path does the same before issuing its table
-            # query; mirror it here so unqualified table names resolve against
-            # the configured Snowflake source schema.
             with connection.cursor() as schema_cursor:
                 schema_cursor.execute(f"USE SCHEMA {schema_name}")
         base_query = _build_snowflake_select_query(
@@ -97,19 +220,11 @@ def dry_run_snowflake_script(request: SnowflakeScriptDryRunRequest):
             request.selected_fields or [],
             request.sort_columns,
         )
-        # The query builder produces a trusted internal SELECT. Appending LIMIT
-        # after ORDER BY preserves the same top-N ordering as the real export
-        # while keeping dry-run bounded at the database.
         query = f"{base_query.rstrip(';')} LIMIT {limit}"
         with connection.cursor() as cursor:
             cursor.execute(query)
             columns = [item[0] for item in (cursor.description or [])]
             rows = cursor.fetchmany(limit)
-        # Run the sample through the same cursor adapter used by migration so
-        # empty batches and changing output schemas are exercised in dry-run.
-        # Use multiple batches whenever the sample has more than one row so
-        # dry-run can detect scripts that change their output schema by batch.
-        sample_batch_size = max(1, min(100, (limit // 2) or 1))
         transformed_cursor = TransformingCursor(
             SampleCursor(columns, rows),
             fetch_size=sample_batch_size,
@@ -132,7 +247,6 @@ def dry_run_snowflake_script(request: SnowflakeScriptDryRunRequest):
             "rows_in": len(rows),
             "rows_out": len(output_frame),
             "input_columns": list(columns),
-            # Match the cursor adapter and file-writer header representation.
             "output_columns": [str(column) for column in output_frame.columns],
             "preview_rows": jsonable_encoder(preview_rows),
             "metadata": transformed_cursor.metadata,
@@ -142,7 +256,7 @@ def dry_run_snowflake_script(request: SnowflakeScriptDryRunRequest):
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     except HTTPException:
         raise
-    except Exception as exc:
+    except Exception:
         logger.exception(
             "Snowflake source script dry-run failed | table=%s",
             request.table_name,
@@ -150,7 +264,7 @@ def dry_run_snowflake_script(request: SnowflakeScriptDryRunRequest):
         raise HTTPException(
             status_code=422,
             detail="Snowflake script dry-run failed. Check the server logs for details.",
-        ) from exc
+        )
     finally:
         if connection is not None:
             try:

@@ -498,6 +498,9 @@ export type TransformDryRunResponse = {
     status?: Record<string, number>;
   };
   mapping_table?: MappingTableRow[];
+  /** Full SAP OData sample (__source_df) before mapping/script. */
+  source_preview?: Record<string, unknown>[];
+  source_columns?: string[];
   input_preview?: Record<string, unknown>[];
   output_preview?: Record<string, unknown>[];
   preview_rows?: Record<string, unknown>[];

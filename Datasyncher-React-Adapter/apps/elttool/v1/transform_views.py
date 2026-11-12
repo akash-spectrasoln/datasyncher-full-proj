@@ -35,6 +35,7 @@ from apps.elttool.transform_limits import (
 from apps.elttool.v1.permissions import CanManageTransform
 from apps.elttool.v1.sap_odata_views import _fastapi_url, _inject_proxy_agent
 from apps.elttool.v1.utils import internal_service_headers
+from apps.elttool.v1.views import _is_file_based_destination
 
 logger = logging.getLogger(__name__)
 
@@ -269,6 +270,11 @@ class EntityTransformValidateAPIView(APIView):
             except json.JSONDecodeError:
                 parsed_mapping = None
 
+        destination_name = getattr(
+            getattr(getattr(connection, "dst_config", None), "dst", None),
+            "name",
+            None,
+        )
         payload = {
             "connection_id": connection_id,
             "table_name": table_name,
@@ -279,6 +285,9 @@ class EntityTransformValidateAPIView(APIView):
             "entry_point": body.get("entry_point") or "",
             "table_fields": table_row.table_fields or {},
             "primary_keys": table_row.primary_keys or [],
+            "destination_is_file_based": _is_file_based_destination(destination_name),
+            "run_order": body.get("run_order")
+            or EntityTransform.RUN_ORDER_FILTER_SCRIPT_MAPPING,
         }
 
         try:

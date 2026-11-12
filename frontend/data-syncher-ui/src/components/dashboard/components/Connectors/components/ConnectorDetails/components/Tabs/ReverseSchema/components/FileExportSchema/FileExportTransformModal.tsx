@@ -154,7 +154,7 @@ const FileExportTransformModal = ({
       loadedKeyRef.current = "";
       return;
     }
-    const loadKey = `${tableItem.table}:a${transformData?.active?.version ?? (transformData?.active ? "act" : "none")}:d${transformData?.draft?.version ?? (transformData?.draft ? "drf" : "none")}:${transformData?.draft?.script_sha256 ?? ""}`;
+    const loadKey = `${tableItem.table}:a${transformData?.active?.version ?? "none"}:d${transformData?.draft?.version ?? "none"}`;
     if (loadedKeyRef.current === loadKey) return;
     loadedKeyRef.current = loadKey;
 
@@ -189,18 +189,24 @@ const FileExportTransformModal = ({
       }
     }
 
-    const rawScript = sessionScript || serverScript || "";
-    const normalizedScript = normalizeTransformScript(rawScript);
+    const initialServerScript = serverScript
+      ? validateTransformRoot(serverScript)
+        ? normalizeTransformScript(serverScript)
+        : serverScript
+      : "";
+    const initialSessionScript = sessionScript
+      ? validateTransformRoot(sessionScript)
+        ? normalizeTransformScript(sessionScript)
+        : sessionScript
+      : "";
+
+    const rawScript = initialSessionScript || initialServerScript || "";
     const hasSavedCode = Boolean(
-      rawScript ||
-        normalizedScript.trim() ||
-        unwrapTransformBody(normalizedScript).trim() ||
-        draftScript ||
-        activeScript,
+      rawScript.trim() || draftScript || activeScript,
     );
 
     if (hasSavedCode) {
-      const scriptToSet = normalizedScript || rawScript;
+      const scriptToSet = initialSessionScript || initialServerScript;
       setScriptText(scriptToSet);
       setApplyScript(true);
       setScriptNameFromUpload(false);
@@ -215,7 +221,9 @@ const FileExportTransformModal = ({
       setScriptFileMeta(null);
     }
 
-    const finalScript = hasSavedCode ? normalizedScript || rawScript : "";
+    const finalScript = hasSavedCode
+      ? initialSessionScript || initialServerScript
+      : "";
     setBaselineScriptText(finalScript);
     setScriptValidatedText(finalScript);
     skipAutosaveUntilRef.current = Date.now() + 1500;
@@ -252,19 +260,15 @@ const FileExportTransformModal = ({
   }, [applyScript, scriptText]);
 
   const scriptEdited = useMemo(() => {
-    if (!scriptBody.trim()) return false;
-    const current = normalizeTransformScript(
-      persistedScriptText(applyScript, scriptText),
-    );
-    const saved = normalizeTransformScript(scriptValidatedText);
+    if (!scriptText.trim()) return false;
+    const current = persistedScriptText(applyScript, scriptText).trim();
+    const saved = (scriptValidatedText || "").trim();
     return current !== saved;
-  }, [applyScript, scriptBody, scriptText, scriptValidatedText]);
+  }, [applyScript, scriptText, scriptValidatedText]);
 
   const isDirty = useMemo(() => {
-    const current = normalizeTransformScript(
-      persistedScriptText(applyScript, scriptText),
-    );
-    const baseline = normalizeTransformScript(baselineScriptText);
+    const current = persistedScriptText(applyScript, scriptText).trim();
+    const baseline = (baselineScriptText || "").trim();
     return current !== baseline;
   }, [applyScript, baselineScriptText, scriptText]);
 
@@ -700,12 +704,11 @@ const FileExportTransformModal = ({
         return;
       }
       toaster.error({
-        title:
-          result.publish_error || "Validate passed but publish did not run",
+        title: result.publish_error || confirmCopy.applyIncomplete,
       });
     } catch {
       toaster.error({
-        title: "Validate failed",
+        title: confirmCopy.applyFailed,
         action: {
           label: confirmCopy.retry,
           onClick: () => {
@@ -1288,7 +1291,7 @@ const FileExportTransformModal = ({
                       loading={publishMut.isPending}
                       onClick={() => void handleValidateAndPublish()}
                     >
-                      Validate
+                      Apply
                     </Button>
                   )}
                 </Flex>

@@ -22,6 +22,7 @@ from apps.elttool.transform_limits import MAX_SCRIPT_BYTES
 from apps.elttool.v1.permissions import CanManageTransform
 from apps.elttool.v1.sap_odata_views import _fastapi_url
 from apps.elttool.v1.utils import internal_service_headers
+from apps.elttool.v1.views import _is_file_based_destination
 
 logger = logging.getLogger(__name__)
 
@@ -39,7 +40,11 @@ class SourceScriptValidatePublishAPIView(APIView):
 
     def post(self, request, connection_id, table_name):
         body = request.data if isinstance(request.data, dict) else {}
-        connection = get_connection_for_user(request.user, connection_id)
+        connection = get_connection_for_user(
+            request.user,
+            connection_id,
+            select_related=("src_config", "dst_config", "dst_config__dst"),
+        )
         table_row = get_object_or_404(
             SourceTableSelection,
             connection_id=connection_id,
@@ -54,12 +59,31 @@ class SourceScriptValidatePublishAPIView(APIView):
                 status=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
             )
 
+        destination_name = getattr(
+            getattr(getattr(connection, "dst_config", None), "dst", None),
+            "name",
+            None,
+        )
+        credentials = connection.src_config.data if connection.src_config else {}
+        selected_fields = table_row.selected_fields
+        if isinstance(selected_fields, str):
+            selected_fields = [
+                part.strip() for part in selected_fields.split(",") if part.strip()
+            ]
         try:
             response = requests.post(
                 _fastapi_url("source-script/validate"),
                 json={
                     "script_text": script_text,
                     "entry_point": entry_point,
+                    "destination_is_file_based": _is_file_based_destination(
+                        destination_name
+                    ),
+                    "source_config": credentials if isinstance(credentials, dict) else {},
+                    "table_name": table_name,
+                    "selected_fields": selected_fields
+                    if isinstance(selected_fields, list)
+                    else None,
                 },
                 headers=internal_service_headers(),
                 timeout=120,

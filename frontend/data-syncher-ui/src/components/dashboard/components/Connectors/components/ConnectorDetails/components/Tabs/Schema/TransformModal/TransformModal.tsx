@@ -1050,6 +1050,20 @@ const TransformModal = ({
         });
         return { ok: false as const, result };
       }
+      const scriptErrors =
+        result.errors?.filter((error) =>
+          (error.path ?? "").startsWith("script"),
+        ) ?? [];
+      if (!result.valid || scriptErrors.length > 0) {
+        const first = scriptErrors[0] ?? result.errors?.[0];
+        toaster.error({
+          title: "Script validation failed",
+          description:
+            first?.message ||
+            "Routine output does not match the database destination schema.",
+        });
+        return { ok: false as const, result };
+      }
       return { ok: true as const, result };
     } catch {
       return { ok: false as const, result: null };
@@ -1372,6 +1386,15 @@ const TransformModal = ({
           });
         }
       }
+      for (const error of validateResult?.errors ?? []) {
+        if (!(error.path ?? "").startsWith("script")) continue;
+        items.push({
+          line: scriptErrorLine(error.traceback, error.line),
+          message: error.message,
+          detail: error.traceback || undefined,
+          source: "server",
+        });
+      }
     }
     for (const error of dryRunResult?.errors ?? []) {
       items.push({
@@ -1391,6 +1414,7 @@ const TransformModal = ({
     scriptText,
     transformRootIssue,
     validateResult?.checklist,
+    validateResult?.errors,
   ]);
   const scriptBlocksNext =
     scriptBytes > MAX_SCRIPT_BYTES ||
@@ -1579,12 +1603,11 @@ const TransformModal = ({
         return;
       }
       toaster.error({
-        title:
-          result.publish_error || "Validate passed but publish did not run",
+        title: result.publish_error || confirmCopy.applyIncomplete,
       });
     } catch {
       toaster.error({
-        title: "Validate failed",
+        title: confirmCopy.applyFailed,
         action: {
           label: confirmCopy.retry,
           onClick: () => {
@@ -2489,13 +2512,38 @@ const TransformModal = ({
                           : ""}
                       </Text>
                     )}
-                    {dryRunResult && (
+                    {!dryRunResult ? (
+                      <Box
+                        py={10}
+                        px={6}
+                        borderWidth={1}
+                        borderStyle="dashed"
+                        borderColor="gray.300"
+                        borderRadius="md"
+                        bg="gray.50/50"
+                        textAlign="center"
+                      >
+                        <Text
+                          fontSize="sm"
+                          color="gray.600"
+                          mb={1}
+                          fontWeight="medium"
+                        >
+                          No dry run executed yet
+                        </Text>
+                        <Text fontSize="xs" color="gray.500">
+                          Click <strong>Run dry run</strong> above to load an
+                          SAP sample and preview <strong>__source_df</strong>{" "}
+                          and <strong>__target_df</strong>.
+                        </Text>
+                      </Box>
+                    ) : (
                       <>
                         <Text fontSize="sm">
                           Rows in: {dryRunResult.rows_in} · Rows out:{" "}
                           {dryRunResult.rows_out} · Columns:{" "}
-                          {(dryRunResult.columns_out ?? []).length} /{" "}
-                          {(dryRunResult.expected_columns ?? []).length}
+                          {dryRunResult.columns_out?.length ?? 0} /{" "}
+                          {dryRunResult.expected_columns?.length ?? 0}
                         </Text>
                         {(dryRunResult.warnings ?? []).map((w) => (
                           <Text
@@ -2532,16 +2580,25 @@ const TransformModal = ({
                             </Text>
                           );
                         })}
-                        {(dryRunResult.input_preview?.length ?? 0) > 0 ? (
+                        {(
+                          dryRunResult.source_preview ??
+                          dryRunResult.input_preview ??
+                          []
+                        ).length > 0 ? (
                           <ExpandablePreviewTable
-                            title="Input sample (mapped SAP columns)"
-                            rows={dryRunResult.input_preview ?? []}
+                            title="Input sample (__source_df)"
+                            rows={
+                              dryRunResult.source_preview ??
+                              dryRunResult.input_preview ??
+                              []
+                            }
                           />
                         ) : (
                           dryRunResult.rows_in > 0 && (
                             <Text fontSize="xs" color="gray.600">
-                              No mapped source columns were available for the
-                              input preview.
+                              SAP returned rows but no columns were available for
+                              the source preview. Check mapping and OData
+                              sample connectivity.
                             </Text>
                           )
                         )}
@@ -2634,7 +2691,7 @@ const TransformModal = ({
                       loading={validateMut.isPending}
                       onClick={() => void handleValidateAndPublish()}
                     >
-                      Validate
+                      Apply
                     </Button>
                   )}
                 </Flex>

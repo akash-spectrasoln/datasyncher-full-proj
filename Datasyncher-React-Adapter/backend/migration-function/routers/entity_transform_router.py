@@ -21,6 +21,13 @@ from services.transform.mapping_resolver import resolve_effective_mapping
 from services.transform.mapping_status import build_mapping_table
 from services.transform.mapping_validator import validate_mapping_json
 from services.transform.row_filter_bridge import dtp_row_filter_to_row_filter_config, row_filter_warnings
+from services.transform.executor import execute_transform_chunk
+from services.transform.schema_output_policy import (
+    expected_columns_from_resolved,
+    schema_mismatch_errors,
+    script_schema_change_errors,
+)
+from services.transform.script_runner import ScriptRuntimeError, effective_script_text, run_transform
 from services.transform.script_validator import script_has_filter_pattern, validate_script_ast
 
 logger = logging.getLogger(__name__)
@@ -37,10 +44,11 @@ class ValidateRequest(BaseModel):
     entry_point: str = ""
     table_fields: Dict[str, Any] = Field(default_factory=dict)
     primary_keys: List[str] = Field(default_factory=list)
+    destination_is_file_based: bool = False
+    run_order: str = "filter_script_mapping"
 
 
 class DryRunRequest(ValidateRequest):
-    run_order: str = "filter_script_mapping"
     sample_size: Optional[int] = None
     source_credentials: Dict[str, Any] = Field(default_factory=dict)
 
@@ -56,6 +64,22 @@ def _normalize_mapping_json(raw: Any) -> Optional[Dict[str, Any]]:
             raise HTTPException(status_code=400, detail={"errors": errors})
         return json.loads(raw)
     raise HTTPException(status_code=400, detail="mapping_json must be object or string")
+
+
+def _minimal_validate_sample_frame(
+    resolved: Dict[str, Any],
+    sap_meta: List[Dict[str, Any]],
+) -> pd.DataFrame:
+    """One null row so row-wise scripts can execute during validate."""
+    columns = list(resolved.get("extract_columns") or [])
+    if not columns:
+        for field in sap_meta:
+            if isinstance(field, dict) and field.get("fieldname"):
+                columns.append(str(field["fieldname"]))
+    columns = list(dict.fromkeys(columns))
+    if not columns:
+        return pd.DataFrame()
+    return pd.DataFrame([{name: None for name in columns}])
 
 
 def _sap_fields_from_table_fields(table_fields: Dict[str, Any]) -> List[Dict[str, Any]]:
@@ -394,6 +418,44 @@ def validate_transform(req: ValidateRequest):
     row_filter_config = dtp_row_filter_to_row_filter_config(
         mapping.get("row_filter") if mapping else None
     )
+
+    ast_failed = any(not item.get("passed") for item in checklist) if checklist else False
+    if (
+        not req.destination_is_file_based
+        and effective_script_text(req.script_text)
+        and not ast_failed
+    ):
+        expected = expected_columns_from_resolved(resolved)
+        sample_df = _minimal_validate_sample_frame(resolved, sap_meta)
+        try:
+            script_result, _ = run_transform(
+                req.script_text, sample_df, req.entry_point or None
+            )
+            declared_script_cols = set(resolved.get("script_columns") or [])
+            errors.extend(
+                script_schema_change_errors(
+                    sample_df, script_result, declared_script_cols
+                )
+            )
+            output_df = execute_transform_chunk(
+                sample_df,
+                mapping,
+                req.mapping_overrides,
+                req.script_text,
+                req.entry_point or None,
+                req.run_order,
+                sap_metadata_fields=sap_meta,
+            )
+            errors.extend(schema_mismatch_errors(output_df, expected))
+        except ScriptRuntimeError as exc:
+            errors.append(
+                {
+                    "path": f"script:{exc.line or 0}",
+                    "message": str(exc),
+                    "traceback": exc.traceback_text,
+                    "type": "script_error",
+                }
+            )
 
     return {
         "valid": len(errors) == 0,
