@@ -45,6 +45,8 @@ spec:
               name: grpc
             - containerPort: 50052
               name: grpc-bootstrap
+            - containerPort: 50053
+              name: grpc-unary
             - containerPort: 8081
               name: http-health
           env:
@@ -61,6 +63,8 @@ spec:
             # sap-proxy-agent-unary (:50053) or in-cluster Django unary pod — required for Enroll.
             - name: TOKEN_VALIDATION_GRPC_TARGET
               value: "sap-proxy-agent-unary-svc:50053"
+            - name: HUB_AGENT_RPC_TIMEOUT_SECONDS
+              value: "120"
           envFrom:
             - secretRef:
                 name: datasyncher-secrets

@@ -31,6 +31,7 @@ import {
   isPlanFlowCapError,
   pipelineHasPublishedRunnableGraph,
   resolvePipelineNodeError,
+  resolvePipelineRunStatus,
   unwrapPipelineRunApiError,
 } from "./pipelineRunHelpers";
 
@@ -51,6 +52,7 @@ function tableStatusBadgeColor(status: string) {
   if (s === "completed" || s === "success") return "green";
   if (s === "failed" || s === "error") return "red";
   if (s === "running" || s === "in_progress") return "blue";
+  if (s === "revoked") return "gray";
   return "gray";
 }
 
@@ -97,6 +99,11 @@ const BatchOverviewPanel = ({
     }
     return map;
   }, [runNode]);
+
+  const runIsRevoked =
+    pipelineRun !== null &&
+    pipelineRun !== undefined &&
+    resolvePipelineRunStatus(pipelineRun) === "revoked";
 
   const canRunPipeline =
     pipeline.nodes.length > 0 && pipelineHasPublishedRunnableGraph(pipeline);
@@ -378,7 +385,9 @@ const BatchOverviewPanel = ({
                     .slice()
                     .sort((a, b) => (a.sequence ?? 0) - (b.sequence ?? 0))
                     .map((t, index) => {
-                      const runStatus = tableStatusMap.get(t.table_name);
+                      const runStatus =
+                        tableStatusMap.get(t.table_name) ||
+                        (runIsRevoked ? "revoked" : undefined);
                       return (
                         <Flex
                           key={t.table_name}

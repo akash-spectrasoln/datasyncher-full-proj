@@ -728,6 +728,8 @@ def _process_sap_odata_to_adls_file(
                         connection_id=connection_id,
                         cmp_id=request.cmp_id,
                         user_id=request.user_id,
+                        log_id=request.log_id,
+                        session=request.session,
                     )
                 else:
                     success, rows_affected, _ = load_initial(
@@ -794,6 +796,8 @@ def _process_sap_odata_to_adls_file(
                         connection_id=connection_id,
                         cmp_id=request.cmp_id,
                         user_id=request.user_id,
+                        log_id=request.log_id,
+                        session=request.session,
                     )
                     raw_token = etl_state.get("delta_token")
                     if not raw_token:
@@ -858,6 +862,8 @@ def _process_sap_odata_to_adls_file(
                         connection_id=connection_id,
                         cmp_id=request.cmp_id,
                         user_id=request.user_id,
+                        log_id=request.log_id,
+                        session=request.session,
                     )
                     next_delta_link = None
                 else:
@@ -951,6 +957,8 @@ def _process_sap_odata_to_adls_file(
                         connection_id=connection_id,
                         cmp_id=request.cmp_id,
                         user_id=request.user_id,
+                        log_id=request.log_id,
+                        session=request.session,
                     )
                     delta_link = None
                 else:
@@ -1049,6 +1057,8 @@ def _process_sap_odata_to_adls_file(
                         connection_id=connection_id,
                         cmp_id=request.cmp_id,
                         user_id=request.user_id,
+                        log_id=request.log_id,
+                        session=request.session,
                     )
                     next_delta_link = None
                 else:
@@ -1424,6 +1434,7 @@ def migrate_sap_odata_to_adls(request: SAPODataADLSMigrationRequest) -> Dict[str
                     cmp_id=request.cmp_id,
                     user_id=request.user_id,
                     log_id=request.log_id,
+                    session=request.session,
                 )
 
             if delta_payloads:
@@ -1439,6 +1450,7 @@ def migrate_sap_odata_to_adls(request: SAPODataADLSMigrationRequest) -> Dict[str
                     cmp_id=request.cmp_id,
                     user_id=request.user_id,
                     log_id=request.log_id,
+                    session=request.session,
                 )
 
             results["status"]       = "in_progress"

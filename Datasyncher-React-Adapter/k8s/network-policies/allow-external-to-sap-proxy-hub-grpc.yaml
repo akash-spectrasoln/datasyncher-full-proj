@@ -1,0 +1,20 @@
+# On-prem SAP proxy agents (mTLS) reach the hub LoadBalancer on :50051/:50052/:50053.
+# Unary :50053 is TCP-proxied by the hub pod sidecar to sap-proxy-agent-unary.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-external-to-sap-proxy-agent-hub-grpc
+spec:
+  podSelector:
+    matchLabels:
+      app: sap-proxy-agent-hub
+  policyTypes:
+    - Ingress
+  ingress:
+    - ports:
+        - protocol: TCP
+          port: 50051
+        - protocol: TCP
+          port: 50052
+        - protocol: TCP
+          port: 50053

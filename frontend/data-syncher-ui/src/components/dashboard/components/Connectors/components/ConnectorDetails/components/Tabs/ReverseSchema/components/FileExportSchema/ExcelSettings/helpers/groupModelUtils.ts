@@ -1,5 +1,7 @@
 import { type ExcelConditionItem } from "@/types/connectors";
 
+import { getColumnDataType, stripFormulaQuotes } from "./types";
+
 export interface ConditionRuleItem {
   id: string;
   type: "rule";
@@ -307,18 +309,76 @@ export const toggleGroupConjunction = (
 ): ConditionRuleGroup => {
   const nextTree = cloneTree(tree);
   const loc = findNodeAndParent(nextTree, groupId);
-  if (!loc || loc.node.type !== "group") {
+  const group =
+    nextTree.id === groupId
+      ? nextTree
+      : loc && loc.node.type === "group"
+        ? (loc.node as ConditionRuleGroup)
+        : null;
+
+  if (!group || group.type !== "group") {
     return tree;
   }
 
-  const group = loc.node as ConditionRuleGroup;
   group.conjunction = group.conjunction === "and" ? "or" : "and";
+  return nextTree;
+};
 
-  // If this group is non-root and now matches its parent's conjunction, auto-merge it into parent
-  if (loc.parent && loc.parent.conjunction === group.conjunction) {
-    const parent = loc.parent;
-    parent.children.splice(loc.index, 1, ...group.children);
+/**
+ * Toggles conjunction at a specific inter-row divider between
+ * children[childIndex - 1] and children[childIndex] in parentGroupId.
+ *
+ * If parent has 2 children, simply toggles parent.conjunction.
+ * If parent has > 2 children, isolates this toggle to this specific divider
+ * by grouping adjacent children on either side with the parent's current conjunction,
+ * and setting parent.conjunction to the toggled conjunction.
+ */
+export const toggleDividerConjunction = (
+  tree: ConditionRuleGroup,
+  parentGroupId: string,
+  childIndex: number,
+): ConditionRuleGroup => {
+  const nextTree = cloneTree(tree);
+  const loc = findNodeAndParent(nextTree, parentGroupId);
+  const parent =
+    nextTree.id === parentGroupId
+      ? nextTree
+      : loc && loc.node.type === "group"
+        ? (loc.node as ConditionRuleGroup)
+        : null;
+
+  if (
+    !parent ||
+    parent.type !== "group" ||
+    childIndex <= 0 ||
+    childIndex >= parent.children.length
+  ) {
+    return tree;
   }
+
+  if (parent.children.length === 2) {
+    parent.conjunction = parent.conjunction === "and" ? "or" : "and";
+    return nextTree;
+  }
+
+  const currentConj = parent.conjunction;
+  const targetConj = currentConj === "and" ? "or" : "and";
+
+  const leftItems = parent.children.slice(0, childIndex);
+  const rightItems = parent.children.slice(childIndex);
+
+  const leftChild: ConditionRuleNode =
+    leftItems.length === 1
+      ? leftItems[0]
+      : createGroup(generateId("g"), currentConj, leftItems);
+
+  const rightChild: ConditionRuleNode =
+    rightItems.length === 1
+      ? rightItems[0]
+      : createGroup(generateId("g"), currentConj, rightItems);
+
+  parent.children = [leftChild, rightChild];
+  parent.conjunction = targetConj;
 
   return nextTree;
 };
@@ -341,12 +401,11 @@ export const conditionsToTree = (
     // Open any new groups on this row
     for (let o = 0; o < numOpen; o++) {
       const parent = stack[stack.length - 1];
+      if (parent.children.length > 0 && c.logic) {
+        parent.conjunction = c.logic.startsWith("or") ? "or" : "and";
+      }
       const defaultConjunction = parent.conjunction === "and" ? "or" : "and";
-      const newGroup = createGroup(
-        `g-${idx}-${o}`,
-        c.logic === "or" ? "or" : defaultConjunction,
-        [],
-      );
+      const newGroup = createGroup(`g-${idx}-${o}`, defaultConjunction, []);
       parent.children.push(newGroup);
       stack.push(newGroup);
     }
@@ -360,14 +419,8 @@ export const conditionsToTree = (
     );
 
     const targetGroup = stack[stack.length - 1];
-    if (
-      targetGroup.id !== "root" &&
-      targetGroup.children.length === 1 &&
-      c.logic
-    ) {
+    if (targetGroup.children.length > 0 && c.logic) {
       targetGroup.conjunction = c.logic.startsWith("or") ? "or" : "and";
-    } else if (targetGroup.id === "root" && idx === 1 && c.logic) {
-      root.conjunction = c.logic.startsWith("or") ? "or" : "and";
     }
     targetGroup.children.push(rule);
 
@@ -448,6 +501,70 @@ export const treeToConditions = (
   return result;
 };
 
+// Formats a rule value for display in human-readable summary, matching Excel conventions:
+// - Numbers: unquoted (e.g. 5, 400)
+// - Booleans: unquoted (e.g. TRUE, FALSE)
+// - Formulas / cell refs starting with '=': unquoted (e.g. =TODAY(), =A1)
+// - Strings / text: quoted with double quotes (e.g. "Pending")
+export const formatRuleValueForSummary = (
+  val: string | undefined,
+  colName: string,
+  tableFields?: Record<string, unknown>,
+): string => {
+  if (val === undefined || val === null) return "";
+  let trimmed = String(val).trim();
+  if (trimmed === "") return '""';
+
+  // Strip formula quotes or outer quotes if already wrapped
+  trimmed = stripFormulaQuotes(trimmed);
+  if (trimmed.startsWith("'") && trimmed.endsWith("'") && trimmed.length >= 2) {
+    trimmed = trimmed.slice(1, -1);
+  }
+
+  // Formula or cell reference starting with '=' -> keep bare
+  if (trimmed.startsWith("=")) {
+    return trimmed;
+  }
+
+  const rawType = tableFields ? tableFields[colName] : undefined;
+  const typeRecord =
+    typeof rawType === "object" && rawType !== null
+      ? (rawType as Record<string, unknown>)
+      : undefined;
+  const typeStr = typeRecord
+    ? (typeof typeRecord.data_type === "string"
+        ? typeRecord.data_type
+        : undefined) ||
+      (typeof typeRecord.type === "string" ? typeRecord.type : undefined)
+    : typeof rawType === "string"
+      ? rawType
+      : undefined;
+  const colDataType = getColumnDataType(typeStr);
+
+  // Booleans in Excel: TRUE / FALSE without quotes
+  const isBool =
+    colDataType === "boolean" ||
+    trimmed.toUpperCase() === "TRUE" ||
+    trimmed.toUpperCase() === "FALSE";
+
+  if (isBool) {
+    return trimmed.toUpperCase();
+  }
+
+  // Numbers in Excel: without quotes
+  const isNum =
+    colDataType === "numeric"
+      ? !isNaN(Number(trimmed)) && trimmed !== ""
+      : !isNaN(Number(trimmed)) && trimmed !== "" && !trimmed.includes(" ");
+
+  if (isNum) {
+    return trimmed;
+  }
+
+  // Text strings in Excel: wrapped in double quotes, escaping internal quotes
+  return `"${trimmed.replace(/"/g, '""')}"`;
+};
+
 // Formats a ConditionRuleNode into clean human-readable text directly from the tree structure
 export const nodeToHumanSummary = (
   node: ConditionRuleNode,
@@ -459,10 +576,24 @@ export const nodeToHumanSummary = (
 
     if (node.operator === "isEmpty") return `${node.column} is empty`;
     if (node.operator === "isNotEmpty") return `${node.column} is not empty`;
-    if (node.operator === "between")
-      return `${node.column} between ${node.value || "?"} and ${node.value2 || "?"}`;
-    if (node.operator === "notBetween")
-      return `${node.column} not between ${node.value || "?"} and ${node.value2 || "?"}`;
+    if (node.operator === "between") {
+      const v1 = node.value
+        ? formatRuleValueForSummary(node.value, node.column, tableFields)
+        : "?";
+      const v2 = node.value2
+        ? formatRuleValueForSummary(node.value2, node.column, tableFields)
+        : "?";
+      return `${node.column} between ${v1} and ${v2}`;
+    }
+    if (node.operator === "notBetween") {
+      const v1 = node.value
+        ? formatRuleValueForSummary(node.value, node.column, tableFields)
+        : "?";
+      const v2 = node.value2
+        ? formatRuleValueForSummary(node.value2, node.column, tableFields)
+        : "?";
+      return `${node.column} not between ${v1} and ${v2}`;
+    }
 
     let op = "=";
     if (node.operator === "notEqual") op = "!=";
@@ -477,7 +608,12 @@ export const nodeToHumanSummary = (
     if (node.operator === "endsWith") op = "ends with";
     if (node.operator === "notEndsWith") op = "does not end with";
 
-    return `${node.column} ${op} "${node.value || ""}"`;
+    const formattedVal = formatRuleValueForSummary(
+      node.value,
+      node.column,
+      tableFields,
+    );
+    return `${node.column} ${op} ${formattedVal}`;
   }
 
   const parts = node.children

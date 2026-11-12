@@ -26,8 +26,6 @@ const IMAGE_MAP = {
   sapodata: SAPODataIllustration,
   sap_odata: SAPODataIllustration,
   sap: SAPODataIllustration,
-  netsuite: MicrosoftDynamicsIllustration,
-  oracle_netsuite: MicrosoftDynamicsIllustration,
   // File-based sources (also valid as destinations)
   sftp: SFTPIllustration,
   googledrive: GoogleDriveIllustration,
@@ -78,7 +76,6 @@ export const getSourceImage = (name: string, fallback?: string): string => {
     sharepoint: SharepointIllustration,
     sapodata: SAPODataIllustration,
     sap: SAPODataIllustration,
-    netsuite: MicrosoftDynamicsIllustration,
   };
 
   for (const [key, image] of Object.entries(partialMatches)) {

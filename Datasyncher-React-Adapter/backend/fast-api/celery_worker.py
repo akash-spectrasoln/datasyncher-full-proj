@@ -3198,6 +3198,12 @@ MIGRATION_FUNCTION_ROOT = os.path.abspath(os.path.join(APP_ROOT, "..", "migratio
 if os.path.isdir(MIGRATION_FUNCTION_ROOT) and MIGRATION_FUNCTION_ROOT not in sys.path:
     sys.path.insert(0, MIGRATION_FUNCTION_ROOT)
 
+# sap_proxy_agent: bundled under migration-function in the fast-api image, or backend/sap_proxy_agent locally.
+for _mf_or_backend in (MIGRATION_FUNCTION_ROOT, os.path.dirname(MIGRATION_FUNCTION_ROOT)):
+    if os.path.isdir(os.path.join(_mf_or_backend, "sap_proxy_agent")) and _mf_or_backend not in sys.path:
+        sys.path.insert(0, _mf_or_backend)
+        break
+
 
 # ---------------------------------------------------------------------------
 # Direct connector dispatch
@@ -3777,8 +3783,44 @@ def _dispatch_direct_connector(function_path, payload):
     raise RuntimeError(f"Unsupported direct connector dispatch path: {function_path}")
 
 
+def _sap_odata_proxy_credentials(payload: dict) -> dict:
+    """Listing uses SAPOData; migrate payloads use source_config."""
+    if not isinstance(payload, dict):
+        return {}
+    for key in ("SAPOData", "sapodata", "source_config"):
+        creds = payload.get(key)
+        if isinstance(creds, dict) and creds:
+            return creds
+    nested = payload.get("data")
+    if isinstance(nested, dict):
+        return _sap_odata_proxy_credentials(nested)
+    return {}
+
+
+def _sap_odata_uses_proxy_agent(payload: dict) -> bool:
+    creds = _sap_odata_proxy_credentials(payload)
+    return str(creds.get("connection_method") or "").strip().lower() == "proxy"
+
+
+def _use_direct_connector_execution(payload: dict) -> bool:
+    """
+    Per-job celery workers run in-process connector code but do not mount hub mTLS certs.
+    SAP OData proxy paths must hit migration-function over HTTP (same as connection tests).
+    """
+    if not CELERY_DIRECT_CONNECTOR_EXECUTION:
+        return False
+    function_path = str((payload or {}).get("function_path") or "")
+    if "SAPOData" in function_path and _sap_odata_uses_proxy_agent(payload):
+        logger.info(
+            "SAP proxy connector: using migration-function HTTP for path=%s",
+            function_path,
+        )
+        return False
+    return True
+
+
 def _execute_connector(url, payload, headers):
-    if CELERY_DIRECT_CONNECTOR_EXECUTION:
+    if _use_direct_connector_execution(payload):
         try:
             return _dispatch_direct_connector(payload.get("function_path"), payload), 200
         except Exception:

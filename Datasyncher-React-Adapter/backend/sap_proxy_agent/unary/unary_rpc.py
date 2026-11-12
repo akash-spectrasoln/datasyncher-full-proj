@@ -114,8 +114,15 @@ def _load_mtls_credentials() -> grpc.ServerCredentials:
     )
 
 
+def _refresh_django_db_connection() -> None:
+    from django.db import close_old_connections
+
+    close_old_connections()
+
+
 class TokenValidationService(service_pb2_grpc.TokenValidationServiceServicer):
     def ValidateBootstrapToken(self, request, context):
+        _refresh_django_db_connection()
         cust_id = request.cust_id
         presented = request.bootstrap_token
         validated, new_token = validate_and_rotate_bootstrap_token(cust_id, presented)
@@ -159,12 +166,29 @@ class GCPTokenBrokerService(service_pb2_grpc.GCPTokenBrokerServiceServicer):
             )
 
 
-def _legacy_status_handler(status_data: dict, context) -> Empty:
+def _log_legacy_status(rpc_name: str, status_data: dict) -> None:
+    logger.info(
+        "[LegacyStatus] %s cust_id=%s session=%s connection_id=%s "
+        "job_name=%s table_name=%s status=%s",
+        rpc_name,
+        status_data.get("cust_id") or status_data.get("agent_id"),
+        status_data.get("migration_session_id"),
+        status_data.get("connection_id"),
+        status_data.get("job_name"),
+        status_data.get("table_name"),
+        status_data.get("status"),
+    )
+
+
+def _legacy_status_handler(rpc_name: str, status_data: dict, context) -> Empty:
+    _refresh_django_db_connection()
+    _log_legacy_status(rpc_name, status_data)
     try:
         apply_legacy_statusdetails(status_data)
+        logger.info("[LegacyStatus] %s ok", rpc_name)
         return Empty()
     except Exception as exc:
-        logger.exception("legacy status update failed: %s", exc)
+        logger.exception("[LegacyStatus] %s failed: %s", rpc_name, exc)
         context.abort(grpc.StatusCode.INVALID_ARGUMENT, str(exc))
 
 
@@ -174,7 +198,7 @@ class TableStatusService(service_pb2_grpc.TableStatusServiceServicer):
             request.statusdetails,
             preserving_proto_field_name=True,
         )
-        return _legacy_status_handler(status_data, context)
+        return _legacy_status_handler("TableStatusUpdate", status_data, context)
 
 
 class TableETLStatusService(service_pb2_grpc.TableETLStatusServiceServicer):
@@ -183,7 +207,7 @@ class TableETLStatusService(service_pb2_grpc.TableETLStatusServiceServicer):
             request.statusdetails,
             preserving_proto_field_name=True,
         )
-        return _legacy_status_handler(status_data, context)
+        return _legacy_status_handler("TableETLStatusUpdate", status_data, context)
 
 
 class DataTransferLogsService(service_pb2_grpc.DataTransferLogsServiceServicer):
@@ -193,7 +217,7 @@ class DataTransferLogsService(service_pb2_grpc.DataTransferLogsServiceServicer):
             preserving_proto_field_name=True,
         )
         status_data.setdefault("status", "completed")
-        return _legacy_status_handler(status_data, context)
+        return _legacy_status_handler("DataTransferLogsUpdate", status_data, context)
 
 
 class MigrationStatusLogService(service_pb2_grpc.MigrationStatusLogServiceServicer):
@@ -203,7 +227,7 @@ class MigrationStatusLogService(service_pb2_grpc.MigrationStatusLogServiceServic
             preserving_proto_field_name=True,
         )
         status_data.setdefault("status", status_data.get("status") or "completed")
-        return _legacy_status_handler(status_data, context)
+        return _legacy_status_handler("MigrationStatusLogUpdate", status_data, context)
 
 
 class RecordTableFailureService(service_pb2_grpc.RecordTableFailureServiceServicer):
@@ -213,7 +237,7 @@ class RecordTableFailureService(service_pb2_grpc.RecordTableFailureServiceServic
             preserving_proto_field_name=True,
         )
         status_data["status"] = "failed"
-        return _legacy_status_handler(status_data, context)
+        return _legacy_status_handler("RecordTableFailureUpdate", status_data, context)
 
 
 def serve() -> None:

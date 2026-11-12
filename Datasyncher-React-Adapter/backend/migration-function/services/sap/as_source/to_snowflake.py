@@ -1738,7 +1738,7 @@ def _sap_snowflake_proxy_batch_load(req: SAPODataSnowflakeMigrationRequest) -> D
             job_name=job_name,
             message="Migration in progress",
             status="I",
-            session=migration_session_id,
+            session=req.session,
             log_id=req.log_id,
         )
 
@@ -1822,6 +1822,7 @@ def _sap_snowflake_proxy_batch_load(req: SAPODataSnowflakeMigrationRequest) -> D
             cmp_id=req.cmp_id,
             user_id=req.user_id,
             log_id=req.log_id,
+            session=req.session,
         )
 
     return results

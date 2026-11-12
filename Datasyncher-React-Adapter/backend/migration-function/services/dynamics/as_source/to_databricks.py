@@ -253,10 +253,26 @@ def _force_full_folder_scan_for_missing_base_tables(
     return last_checked_datedirectory, missing_full
 
 
+def _databricks_cluster_cold_start_retryable(exc: Exception) -> bool:
+    """All-purpose cluster still starting — Celery may retry instead of failing the batch."""
+    text = str(exc).lower()
+    return any(
+        phrase in text
+        for phrase in (
+            "stayed pending",
+            "did not become running",
+            "restarting",
+            "resizing",
+            "starting",
+            "did not start",
+        )
+    )
+
+
 def _is_retryable_migration_error(exc: Exception) -> bool:
     """Transient errors that Celery child tasks may retry — do not mark terminal failed yet."""
     if exc.__class__.__name__ == "DatabricksWarehouseUnavailable":
-        return False
+        return _databricks_cluster_cold_start_retryable(exc)
     text = f"{exc!r} {exc}".lower()
     if "resource_exhausted" in text or "cannot run queries" in text:
         return False

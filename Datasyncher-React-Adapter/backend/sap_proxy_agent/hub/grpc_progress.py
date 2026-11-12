@@ -59,6 +59,17 @@ def build_progress_servicer(service_pb2, service_pb2_grpc, relay_fn):
             body = _progress_body_from_request(request)
             raw_body = json.dumps(body, separators=(",", ":")).encode("utf-8")
 
+            logger.info(
+                "[ReportProgress] received agent_uid=%s event=%s session=%s "
+                "connection_id=%s job_name=%s table_name=%s",
+                agent_uid or request.cust_id,
+                body.get("event"),
+                body.get("migration_session_id"),
+                body.get("connection_id"),
+                body.get("job_name"),
+                body.get("table_name") or "",
+            )
+
             status_code, data = relay_progress_to_django(
                 agent_uid=agent_uid or request.cust_id,
                 body=body,
@@ -68,11 +79,26 @@ def build_progress_servicer(service_pb2, service_pb2_grpc, relay_fn):
 
             if status_code >= 400 or not data.get("accepted"):
                 msg = str(data.get("error") or data.get("message") or "rejected")
+                logger.warning(
+                    "[ReportProgress] rejected agent_uid=%s event=%s http=%s message=%s",
+                    agent_uid or request.cust_id,
+                    body.get("event"),
+                    status_code,
+                    msg,
+                )
                 return service_pb2.ProgressAck(
                     accepted=False,
                     message=msg,
                 )
 
+            logger.info(
+                "[ReportProgress] accepted agent_uid=%s event=%s overall_status=%s "
+                "tables_remaining=%s",
+                agent_uid or request.cust_id,
+                body.get("event"),
+                data.get("overall_status"),
+                data.get("tables_remaining"),
+            )
             return service_pb2.ProgressAck(
                 accepted=True,
                 overall_status=str(data.get("overall_status") or ""),

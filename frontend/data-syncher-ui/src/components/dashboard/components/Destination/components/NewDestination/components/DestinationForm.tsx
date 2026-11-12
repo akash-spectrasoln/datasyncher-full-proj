@@ -24,11 +24,7 @@ import { useFetchDestinationById } from "@/queryOptions/destination/useFetchDest
 import useTriggerDestination from "@/queryOptions/destination/useTriggerDestination";
 import { useUpdateDestination } from "@/queryOptions/destination/useUpdateDestination";
 import useFetchFormSchema from "@/queryOptions/useFetchFormSchema";
-import {
-  type DatabricksSparkJobProvisionOutcome,
-  type Destination,
-  type DestinationSaveResponse,
-} from "@/types/destination";
+import { type Destination } from "@/types/destination";
 import { type ErrorResponseType } from "@/types/error";
 
 import DeleteConfirmationDialog from "./DeleteConfirmationDialog";
@@ -41,27 +37,6 @@ import { initialState, newDestinationFormReducer } from "./reducer";
 
 const GDRIVE_FOLDER_CONFIRMATION_ERROR =
   "GOOGLE_DRIVE_FOLDER_CONFIRMATION_REQUIRED";
-
-function showDatabricksSparkJobProvisionToast(
-  response: DatabricksSparkJobProvisionOutcome,
-) {
-  if (!response.databricks_spark_job_provision_error) {
-    if (
-      response.databricks_spark_job_provision_status === "success" &&
-      response.databricks_spark_job_name
-    ) {
-      toaster.success({
-        title: "Dedicated serverless job ready",
-        description: `Databricks job ${response.databricks_spark_job_name} is provisioned.`,
-      });
-    }
-    return;
-  }
-  toaster.warning({
-    title: "Dedicated serverless job",
-    description: response.databricks_spark_job_provision_error,
-  });
-}
 
 function destinationTestErrorDescription(err: unknown): string {
   if (typeof err === "string" && err.trim()) {
@@ -217,11 +192,12 @@ const DestinationForm = ({ mode }: { mode: "edit" | "add" }) => {
     if (mode === "edit") {
       updateDestination(finalPayload, {
         onSuccess: (response) => {
-          const saveResponse = response;
-          if (saveResponse.auth_url) {
-            window.location.href = saveResponse.auth_url;
+          const responseWithAuth = response as unknown as {
+            auth_url?: string;
+          };
+          if (responseWithAuth.auth_url) {
+            window.location.href = responseWithAuth.auth_url;
           } else {
-            showDatabricksSparkJobProvisionToast(saveResponse);
             toaster.success({
               title: "Destination updated successfully",
               description: `Your ${formState.destinationName} destination has been updated.`,
@@ -233,11 +209,10 @@ const DestinationForm = ({ mode }: { mode: "edit" | "add" }) => {
       return;
     }
     createDestination(finalPayload, {
-      onSuccess: (response: DestinationSaveResponse) => {
+      onSuccess: (response: { auth_url?: string; message?: string }) => {
         if (response.auth_url) {
           window.location.href = response.auth_url;
         } else {
-          showDatabricksSparkJobProvisionToast(response);
           toaster.success({
             title: "Destination created successfully",
             description: `Your ${destinationName} destination has been created.`,

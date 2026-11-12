@@ -31,6 +31,25 @@ class PipelineRunHelperTests(unittest.TestCase):
             task_had_immediate_failure([{"status": "success", "tables": ["a"]}])
         )
 
+    def test_rollup_pipeline_overall_counts_revoked_tables(self):
+        nodes_payload = [
+            {
+                "status": "revoked",
+                "table_count": 2,
+                "migration_status": {
+                    "tables": [
+                        {"status_icon": "revoked"},
+                        {"status_icon": "completed"},
+                    ]
+                },
+            },
+        ]
+        overall = rollup_pipeline_overall(nodes_payload, "revoked")
+        self.assertEqual(overall["status"], "revoked")
+        self.assertEqual(overall["tables_revoked"], 1)
+        self.assertEqual(overall["tables_completed"], 1)
+        self.assertEqual(overall["nodes_revoked"], 1)
+
     def test_rollup_pipeline_overall_counts_nodes_and_tables(self):
         nodes_payload = [
             {

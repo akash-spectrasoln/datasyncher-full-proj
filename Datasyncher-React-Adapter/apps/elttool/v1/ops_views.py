@@ -72,6 +72,7 @@ class InternalAdminOpsPushAPIView(APIView):
 
     authentication_classes = []
     permission_classes = [IsInternalService]
+    throttle_classes = []
 
     def post(self, request):
         try:

@@ -8,6 +8,44 @@ import {
 
 export type ColumnDataType = "numeric" | "datetime" | "boolean" | "text";
 
+export const getColumnDataType = (
+  typeStr: string | undefined,
+): ColumnDataType => {
+  if (!typeStr) return "text";
+  const lower = typeStr.toLowerCase();
+  if (
+    lower.includes("number") ||
+    lower.includes("int") ||
+    lower.includes("float") ||
+    lower.includes("double") ||
+    lower.includes("decimal") ||
+    lower.includes("numeric") ||
+    lower.includes("real")
+  ) {
+    return "numeric";
+  }
+  if (
+    lower.includes("date") ||
+    lower.includes("time") ||
+    lower.includes("timestamp")
+  ) {
+    return "datetime";
+  }
+  if (lower.includes("bool")) {
+    return "boolean";
+  }
+  return "text";
+};
+
+export const stripFormulaQuotes = (val?: string): string => {
+  if (!val) return "";
+  const trimmed = String(val).trim();
+  if (trimmed.startsWith('"') && trimmed.endsWith('"') && trimmed.length >= 2) {
+    return trimmed.slice(1, -1).replace(/""/g, '"');
+  }
+  return val;
+};
+
 export interface ExcelSettingsProps {
   excelOptions: ExcelOptions | undefined;
   excelSheetName: string | undefined;

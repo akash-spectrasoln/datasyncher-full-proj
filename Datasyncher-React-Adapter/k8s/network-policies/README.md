@@ -15,6 +15,7 @@ kubectl apply -f k8s/network-policies/
 | `allow-gateway-to-django.yaml` | Allow `proxy-agent-gateway` → `django` on TCP 8000 for internal migration-progress ingest. |
 | `allow-hub-to-django.yaml` | Allow `sap-proxy-agent-hub` → `django` on TCP 8000 for gRPC progress relay. |
 | `allow-migration-function-to-sap-proxy-agent-hub.yaml` | Allow `migration-function` → `sap-proxy-agent-hub` on TCP 50051 (SAP OData proxy gRPC client). |
+| `allow-external-to-sap-proxy-hub-grpc.yaml` | Allow agents (LB) → `sap-proxy-agent-hub` on TCP 50051–50053; :50053 TCP-forwards to unary. |
 
 ## Prerequisites
 

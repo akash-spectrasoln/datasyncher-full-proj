@@ -251,7 +251,7 @@ export const EmailToolbar: React.FC<EmailToolbarProps> = ({
                   const isFieldChecked = selectedBodyFields.includes(field.id);
                   const fieldLabel =
                     field.id === "path"
-                      ? getPathLabel(destinationName, pathLabel)
+                      ? getPathLabel(destinationName ?? "", pathLabel)
                       : field.label;
                   return (
                     <Flex

@@ -38,6 +38,8 @@ COPY fast-api/ .
 
 # Celery direct connector dispatch imports services/models from migration-function.
 COPY migration-function/ /migration-function/
+# SAP proxy OData (update schema / listing) imports sap_proxy_agent from migration-function code paths.
+COPY sap_proxy_agent/ /migration-function/sap_proxy_agent/
 
 RUN echo "cachebust=${CACHEBUST}"
 

@@ -954,6 +954,7 @@ async def call_function_authorize_google_drive_source(request: Request):
         response = requests.get(
             get_api_url('Source-GoogleDrive-Authorization'),
             params=dict(request.query_params),
+            headers=_internal_headers(),
             timeout=60,
         )
         response.raise_for_status()

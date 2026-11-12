@@ -17,6 +17,7 @@ from .pipeline_views import (
     PipelineNodeDetailView,
     PipelineNodesView,
     PipelineRunDetailView,
+    PipelineRunRevokeView,
     PipelineRunListView,
     PipelineRunNowView,
     PipelineResetView,
@@ -331,6 +332,11 @@ urlpatterns = [
     path('pipelines/<int:pipeline_id>/run/', PipelineRunNowView.as_view(), name='pipeline-run'),
     path('pipelines/<int:pipeline_id>/runs/', PipelineRunListView.as_view(), name='pipeline-run-list'),
     path('pipelines/<int:pipeline_id>/runs/<int:run_id>/', PipelineRunDetailView.as_view(), name='pipeline-run-detail'),
+    path(
+        'pipelines/<int:pipeline_id>/runs/<int:run_id>/revoke/',
+        PipelineRunRevokeView.as_view(),
+        name='pipeline-run-revoke',
+    ),
 
     path('admin/ops/overview/', OpsOverviewAPIView.as_view(), name='admin-ops-overview'),
     path('admin/ops/jobs/', OpsJobsListAPIView.as_view(), name='admin-ops-jobs'),

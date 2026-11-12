@@ -271,6 +271,7 @@ def build_migration_status(migration_session_id, connection_id=None):
     all_completed = True
     any_failed = False
     any_deleted = False
+    any_revoked = False
     any_open = False
     table_warning_messages = []
 
@@ -328,6 +329,10 @@ def build_migration_status(migration_session_id, connection_id=None):
         elif normalized_status == 'deleted':
             status_icon = 'deleted'
             any_deleted = True
+            all_completed = False
+        elif normalized_status == 'revoked':
+            status_icon = 'revoked'
+            any_revoked = True
             all_completed = False
         elif normalized_status == 'completed':
             status_icon = 'completed'
@@ -465,6 +470,7 @@ def build_migration_status(migration_session_id, connection_id=None):
             'in_progress' if any_open else
             'failed' if any_failed else
             'deleted' if any_deleted else
+            'revoked' if any_revoked else
             'completed' if all_completed else
             'in_progress'
         )

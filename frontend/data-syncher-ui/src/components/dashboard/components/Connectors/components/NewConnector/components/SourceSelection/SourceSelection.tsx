@@ -33,7 +33,6 @@ const Source = ({
   const DISPLAY_TO_API_NAME_MAP: Record<string, string> = {
     "Microsoft Dynamics 365 F&O": "MicrosoftDynamics365_FO",
     "Amazon S3": "AmazonS3",
-    NetSuite: "NetSuite",
   };
 
   return (

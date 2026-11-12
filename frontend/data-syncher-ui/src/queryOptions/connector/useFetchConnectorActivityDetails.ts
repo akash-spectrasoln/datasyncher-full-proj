@@ -3,6 +3,8 @@ import { applyTerminalDetailsPatch } from "@/helpers/activityLog";
 import AxiosInstance from "@/lib/axios/api-client";
 import { type ConnectorActivityDetailResponse } from "@/types/connectors";
 
+import { isApiThrottleError } from "@/components/dashboard/components/Scheduling/pipelineRunHelpers";
+
 import { useQuery } from "@tanstack/react-query";
 
 const fetchConnectorActivityDetails = async (
@@ -70,9 +72,16 @@ const useFetchConnectorActivityDetails = ({
         status.includes("failed") ||
         status.includes("error");
 
-      return isTerminal ? false : 4000;
+      if (isQueryThrottled(query)) return false;
+      return isTerminal ? false : 10_000;
     },
   });
 };
+
+function isQueryThrottled(query: {
+  state: { error: unknown };
+}): boolean {
+  return isApiThrottleError(query.state.error);
+}
 
 export default useFetchConnectorActivityDetails;

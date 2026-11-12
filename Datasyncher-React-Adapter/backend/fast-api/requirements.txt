@@ -25,11 +25,12 @@ cryptography>=41.0.7,<43.0.0
 pandas==2.2.3
 numpy==2.1.3
 adlfs==2023.1.0
+# Firestore/Storage 2.7.x pins protobuf<5; SAP gRPC stubs need protobuf 7.35+ (runtime_version).
 google-auth==2.26.1
 google-auth-oauthlib==1.2.1
 google-auth-httplib2==0.2.0
-google-cloud-storage==2.16.0
-google-cloud-firestore==2.7.1
+google-cloud-storage>=2.18.0,<3.0.0
+google-cloud-firestore>=2.30.0,<3.0.0
 snowflake-connector-python>=3.12.0,<4.0.0
 snowflake-sqlalchemy==1.6.1
 databricks-sql-connector>=3.0.0
@@ -46,7 +47,9 @@ openpyxl>=3.1.2
 xlsxwriter>=3.2.0
 python-dotenv==1.0.0
 # Align with sap_proxy_agent generated stubs (GRPC_GENERATED_VERSION in service_pb2_grpc.py).
+# service_pb2 gencode 7.35.1 requires matching protobuf runtime (ValidateProtobufRuntimeVersion).
 grpcio>=1.85.1,<2.0.0
+protobuf>=7.35.1,<8.0.0
 
 # SAP OData (Update Schema metadata parsing)
 xmltodict>=0.13.0

@@ -109,6 +109,26 @@ message ProgressAck {
 
 **Hub responsibilities (outside agent repo):** verify agent mTLS, relay to DataSyncher Django ingest (same DB updates as HTTPS gateway). Agent does **not** send `X-INTERNAL-KEY`.
 
+### Platform logging (batch / ops)
+
+Mirror agent `[STATUS]` lines by grepping hub and Django logs after a migration:
+
+| Prefix | Pod / service | Meaning |
+|--------|----------------|---------|
+| `[ReportProgress] received` | `sap-proxy-agent-hub` | Agent hit hub `:50051` with `ReportProgress` (good path). |
+| `[ReportProgress] accepted` / `rejected` | hub | Django relay result; `rejected` includes validation/auth message. |
+| `[ReportProgress] django relay` | hub | HTTP hop to `internal/proxy-agent/migration-progress/`. |
+| `proxy_agent_progress accepted` | Django | ORM + WS push succeeded. |
+| `[LegacyStatus] MigrationStatusLogUpdate` | `sap-proxy-agent-unary` | Legacy `:50053` RPC (only if agent dials unary, not hub). |
+
+If the agent still logs `UNIMPLEMENTED` for `MigrationStatusLog*` / `RecordTableFailure*`, hub logs will **not** show `[ReportProgress]` — the call never reached the progress servicer (wrong port or legacy stub on hub).
+
+```bash
+kubectl logs deploy/sap-proxy-agent-hub --tail=200 | grep ReportProgress
+kubectl logs deploy/sap-proxy-agent-unary --tail=200 | grep LegacyStatus
+kubectl logs deploy/django --tail=200 | grep proxy_agent_progress
+```
+
 Regenerate `service_pb2*` when hub + agent ship `ReportProgress` together.
 
 ### Legacy ODATA agent RPCs → DataSyncher events

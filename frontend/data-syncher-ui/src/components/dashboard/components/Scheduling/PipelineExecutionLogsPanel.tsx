@@ -47,7 +47,9 @@ const PipelineNodeExecutionTab = ({
 }) => {
   const queryClient = useQueryClient();
   const runStatus = resolvePipelineRunStatus(run);
-  const runTerminal = ["failed", "completed", "timeout"].includes(runStatus);
+  const runTerminal = ["failed", "completed", "timeout", "revoked"].includes(
+    runStatus,
+  );
   const migrationSessionId = node.migration_session_id ?? null;
 
   useMigrationStatusWS(

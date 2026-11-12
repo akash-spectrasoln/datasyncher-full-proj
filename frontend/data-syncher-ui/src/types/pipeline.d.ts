@@ -133,13 +133,15 @@ export type PipelineNodeRunStatus =
   | "completed"
   | "failed"
   | "timeout"
-  | "skipped";
+  | "skipped"
+  | "revoked";
 
 export type PipelineRunStatus =
   | "queued"
   | "running"
   | "completed"
   | "failed"
+  | "revoked"
   | "deleted";
 
 export type PipelineRunOverall = {
@@ -148,9 +150,11 @@ export type PipelineRunOverall = {
   nodes_failed: number;
   nodes_running: number;
   nodes_skipped?: number;
+  nodes_revoked?: number;
   tables_completed: number;
   tables_total: number;
   tables_failed: number;
+  tables_revoked?: number;
   status: string;
 };
 
@@ -214,6 +218,7 @@ export type PipelineRunSummary = {
   pipeline_run_id: number;
   run_mode?: PipelineRunMode;
   status: string;
+  waiting_for_flow_slot?: boolean;
   started_at: string | null;
   finished_at: string | null;
   overall: PipelineRunOverall;

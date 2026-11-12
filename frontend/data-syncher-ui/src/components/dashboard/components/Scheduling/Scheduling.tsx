@@ -25,11 +25,13 @@ import {
 
 import {
   MdAccountTree,
+  MdBlock,
   MdCheckCircle,
   MdChevronLeft,
   MdChevronRight,
   MdDelete,
   MdEdit,
+  MdExpandMore,
   MdPause,
   MdPlayArrow,
   MdRestore,
@@ -40,6 +42,7 @@ import { useSearchParams } from "react-router";
 
 import { toaster } from "@/components/ui/toaster";
 import { Tooltip } from "@/components/ui/tooltip";
+import usePipelineRunWS from "@/hooks/usePipelineRunWS";
 import {
   pipelineRunsQueryKey,
   pipelinesQueryKey,
@@ -57,6 +60,7 @@ import {
   usePipelineRuns,
   usePipelines,
   useResetPipeline,
+  useRevokePipelineRun,
   useRunPipeline,
   useUpdatePipelineNode,
   useValidatePipeline,
@@ -95,6 +99,7 @@ import {
 import {
   batchNodesOnly,
   buildAutoArrangeUpdates,
+  buildPipelineNodePositionMap,
   computeDisconnectedBatchIds,
   computeRootNodeIds,
   findEdgeInsertTarget,
@@ -176,6 +181,7 @@ function normalizeNodeRunStatus(
   if (s === "running") return "running";
   if (s === "waiting") return "waiting";
   if (s === "skipped") return "skipped";
+  if (s === "revoked") return "revoked";
   return "pending";
 }
 
@@ -347,6 +353,7 @@ function pipelineToFlow(
   edges: Edge[];
 } {
   const graphView = options.graphView ?? "draft";
+  const runSnapshotActive = options.runSnapshotActive ?? false;
   const overlayRunStatus = options.overlayRunStatus ?? false;
   const animateActiveEdges = options.animateActiveEdges ?? overlayRunStatus;
   const connectionHighlight = options.connectionHighlight ?? null;
@@ -359,8 +366,8 @@ function pipelineToFlow(
   const isPublishedView =
     graphView === "published" &&
     Boolean(published?.node_ids?.length || published?.edges?.length);
-  // Historic run layout only once matching run detail is loaded.
-  const isRunSnapshotView = Boolean(pipelineRun);
+  // Historic run layout only when run snapshot mode is active (not draft edit).
+  const isRunSnapshotView = runSnapshotActive && Boolean(pipelineRun);
 
   const connNameMap = new Map(
     connections.map((c) => [c.connection_id, c.connection_name]),
@@ -745,6 +752,8 @@ type PipelineCanvasProps = {
   onSelectNode: (_node: NonNullable<SelectedNode>) => void;
   onClearSelection: () => void;
   onPushUndo?: (_entry: CanvasUndoEntry) => void;
+  /** Switch from run overlay to full draft canvas (e.g. after dropping a batch). */
+  onEnterDraftEdit?: () => void;
 };
 
 const PipelineCanvas = ({
@@ -762,6 +771,7 @@ const PipelineCanvas = ({
   onSelectNode,
   onClearSelection,
   onPushUndo,
+  onEnterDraftEdit,
 }: PipelineCanvasProps) => {
   const { screenToFlowPosition, fitView, setViewport, getViewport } =
     useReactFlow();
@@ -868,8 +878,34 @@ const PipelineCanvas = ({
     ? `${connectionHighlight.mode}:${[...connectionHighlight.edgeIds].sort().join(",")}:${[...connectionHighlight.nodeIds].sort().join(",")}`
     : "";
 
+  const runProgressKey = pipelineRun
+    ? [
+        pipelineRun.status,
+        (pipelineRun.current_node_ids ?? [pipelineRun.current_node_id])
+          .filter((id): id is number => id !== null && id !== undefined)
+          .join(","),
+        (pipelineRun.nodes ?? [])
+          .map((n) => {
+            const tables = n.migration_status?.tables ?? [];
+            const done = tables.filter((t) => {
+              const icon = (t.status_icon || t.status || "").toLowerCase();
+              return (
+                icon === "completed" ||
+                icon === "success" ||
+                icon === "failed" ||
+                icon === "error" ||
+                icon === "skipped" ||
+                icon === "revoked"
+              );
+            }).length;
+            return `${n.node_id}:${n.status}:${done}/${n.migration_status?.total_tables ?? n.table_count}`;
+          })
+          .join("|"),
+      ].join(";")
+    : "";
+
   const pipelineNodeKey = selectedPipeline
-    ? `${selectedPipeline.id}:${graphView}:${runSnapshotActive}:${runDetailLoading}:${selectedPipeline.nodes.map((n) => n.id).join(",")}:${selectedPipeline.edges.map((e) => e.id).join(",")}:${selectedPipeline.published_graph?.fingerprint ?? ""}:${selectedPipeline.next_run_at ?? ""}:${selectedPipeline.readable_schedule ?? ""}:${overlayRunStatus}:${animateActiveEdges}:${pipelineRun?.pipeline_run_id ?? ""}:${pipelineRun?.status ?? ""}:${(pipelineRun?.nodes ?? []).map((n) => `${n.node_id}:${n.status}`).join(",")}:${highlightKey}`
+    ? `${selectedPipeline.id}:${graphView}:${runSnapshotActive}:${runDetailLoading}:${selectedPipeline.nodes.map((n) => n.id).join(",")}:${selectedPipeline.edges.map((e) => e.id).join(",")}:${selectedPipeline.published_graph?.fingerprint ?? ""}:${selectedPipeline.next_run_at ?? ""}:${selectedPipeline.readable_schedule ?? ""}:${overlayRunStatus}:${animateActiveEdges}:${pipelineRun?.pipeline_run_id ?? ""}:${runProgressKey}:${highlightKey}`
     : "";
 
   useEffect(() => {
@@ -1012,8 +1048,19 @@ const PipelineCanvas = ({
           x: event.clientX,
           y: event.clientY,
         });
-        const layoutPositions = selectedPipeline
-          ? layoutPipelineLR(selectedPipeline.nodes, selectedPipeline.edges)
+        const flowPositions = new Map<number, { x: number; y: number }>();
+        for (const n of nodes) {
+          const id = Number(n.id);
+          if (Number.isFinite(id)) {
+            flowPositions.set(id, n.position);
+          }
+        }
+        const positionMap = selectedPipeline
+          ? buildPipelineNodePositionMap(
+              selectedPipeline.nodes,
+              flowPositions,
+              selectedPipeline.edges,
+            )
           : new Map();
         const insertBetween =
           selectedPipeline &&
@@ -1021,7 +1068,7 @@ const PipelineCanvas = ({
             position,
             selectedPipeline.nodes,
             selectedPipeline.edges,
-            layoutPositions,
+            positionMap,
           );
         await addNode
           .mutateAsync({
@@ -1034,20 +1081,33 @@ const PipelineCanvas = ({
           .then((created) => {
             onPushUndo?.({ type: "removeNode", nodeId: created.id });
           });
+        if (runSnapshotActive) {
+          onEnterDraftEdit?.();
+        }
         toaster.success({
           title: insertBetween ? "Batch inserted" : "Batch added to pipeline",
         });
       } catch (err: unknown) {
-        const message =
-          (err as { response?: { data?: { error?: string } } })?.response?.data
-            ?.error ?? "Could not add batch to pipeline.";
-        toaster.error({ title: "Add batch failed", description: message });
+        const raw =
+          (err as { response?: { data?: { error?: string | string[] } } })
+            ?.response?.data?.error ?? "Could not add batch to pipeline.";
+        const message = Array.isArray(raw) ? raw.join(" ") : String(raw);
+        const cycleHint = /cycle/i.test(message)
+          ? " Drop on open canvas (not on a line) to add in parallel, then connect from Start or another batch."
+          : "";
+        toaster.error({
+          title: "Add batch failed",
+          description: `${message}${cycleHint}`,
+        });
       }
     },
     [
       addNode,
       isPublishedView,
+      nodes,
+      onEnterDraftEdit,
       onPushUndo,
+      runSnapshotActive,
       screenToFlowPosition,
       selectedPipeline,
       selectedPipelineId,
@@ -1511,6 +1571,8 @@ const Scheduling = () => {
   const [searchParams, setSearchParams] = useSearchParams();
   const skipNextPinClearRef = useRef(false);
   const deepLinkHandledRef = useRef(false);
+  /** True after "Edit canvas" (or draft edit via drop) — do not auto-pin live run. */
+  const draftEditIntentRef = useRef(false);
 
   useEffect(() => {
     if (pipelinesLoading || deepLinkHandledRef.current) return;
@@ -1584,6 +1646,7 @@ const Scheduling = () => {
   }, [pipelines, pipelinesLoading, searchParams, setSearchParams]);
 
   const selectPipeline = useCallback((pipelineId: number | null) => {
+    draftEditIntentRef.current = false;
     setSelectedPipelineId(pipelineId);
     if (pipelineId !== null) persistLastPipelineId(pipelineId);
     setSelectedNode(null);
@@ -1630,6 +1693,7 @@ const Scheduling = () => {
   const queryClient = useQueryClient();
   const deletePipeline = useDeletePipeline();
   const runPipeline = useRunPipeline();
+  const revokePipelineRun = useRevokePipelineRun();
   const validatePipeline = useValidatePipeline();
   const resetPipeline = useResetPipeline();
   const updateNode = useUpdatePipelineNode(selectedPipelineId ?? 0);
@@ -1825,6 +1889,7 @@ const Scheduling = () => {
         validationSnapshot.result.valid) ||
       validationStale);
 
+  usePipelineRunWS(selectedPipelineId, activeRunId);
   const {
     data: pipelineRun,
     isPending: isPipelineRunPending,
@@ -1909,8 +1974,9 @@ const Scheduling = () => {
 
   useEffect(() => {
     if (!selectedPipelineId || !draftCanvasMode) return;
+    if (draftEditIntentRef.current) return;
     if (pipelineRuns.length === 0) return;
-    // If a run is in progress, leave draft edit and show live status on the canvas.
+    // If a run is in progress, show live status (unless user chose draft edit).
     const latest = pipelineRuns[0];
     if (isLivePipelineRunStatus(resolvePipelineRunStatus(latest))) {
       setDraftCanvasMode(false);
@@ -1969,19 +2035,24 @@ const Scheduling = () => {
     }
   }, [pipelineRun, queryClient, selectedPipelineId]);
 
-  const handleEditCanvas = useCallback(() => {
+  const enterDraftCanvasEdit = useCallback(() => {
+    draftEditIntentRef.current = true;
     setDraftCanvasMode(true);
     setPinnedRunId(null);
     setActiveRunId(null);
     setExecutionLogProcessName(null);
     setCenterViewTab("flow");
     setGraphView("draft");
+  }, []);
+
+  const handleEditCanvas = useCallback(() => {
+    enterDraftCanvasEdit();
     toaster.info({
       title: "Editing draft canvas",
       description:
         "Pick a run from the dropdown to view execution status again.",
     });
-  }, []);
+  }, [enterDraftCanvasEdit]);
 
   const handlePipelinePrefetch = useCallback(
     (pipelineId: number) => {
@@ -2000,6 +2071,7 @@ const Scheduling = () => {
 
   const handleRunSelect = useCallback(
     (runId: number) => {
+      draftEditIntentRef.current = false;
       setDraftCanvasMode(false);
       const latestId = pipelineRuns[0]?.pipeline_run_id ?? null;
       if (latestId !== null && runId === latestId) {
@@ -2014,6 +2086,7 @@ const Scheduling = () => {
   );
 
   const handleRunStarted = useCallback((runId: number) => {
+    draftEditIntentRef.current = false;
     setDraftCanvasMode(false);
     // Pin until pipelineRuns includes this id � avoids snapping back to a stale
     // failed "latest" row while the runs list refetches after Run now.
@@ -2342,6 +2415,32 @@ const Scheduling = () => {
       });
     }
   };
+
+  const handleRevokePipelineRun = async () => {
+    if (!selectedPipelineId || !activePipelineRun) return;
+    try {
+      await revokePipelineRun.mutateAsync({
+        pipelineId: selectedPipelineId,
+        runId: activePipelineRun.pipeline_run_id,
+      });
+      toaster.success({
+        title: "Flow revoked",
+        description: "This run was stopped. Tables still in progress are marked revoked.",
+      });
+    } catch (err: unknown) {
+      const { data } = unwrapPipelineRunApiError(err);
+      const message =
+        (typeof data?.error === "string" && data.error) ||
+        "Could not revoke this run.";
+      toaster.error({ title: "Revoke failed", description: message });
+    }
+  };
+
+  const canRevokeActiveRun = Boolean(
+    selectedPipelineId &&
+      activePipelineRun &&
+      isLivePipelineRunStatus(resolvePipelineRunStatus(activePipelineRun)),
+  );
 
   const handleAutoArrange = async () => {
     if (!selectedPipeline || !selectedPipelineId) return;
@@ -2761,14 +2860,14 @@ const Scheduling = () => {
               <Input
                 size="sm"
                 mb={3}
-                placeholder="Search connections or batches�"
+                placeholder="Search connections or batches"
                 value={connectionSearch}
                 onChange={(e) => setConnectionSearch(e.target.value)}
                 aria-label="Search connections or batches"
               />
               {connectionsLoading && (
                 <Text fontSize="sm" color="gray.500">
-                  Loading connections�
+                  Loading connections…
                 </Text>
               )}
               {connectionsError && (
@@ -2788,7 +2887,7 @@ const Scheduling = () => {
                 connections.length > 0 &&
                 filteredConnections.length === 0 && (
                   <Text fontSize="sm" color="gray.500" mb={3}>
-                    No connections or batches match �{connectionSearch.trim()}�.
+                    No connections or batches match “{connectionSearch.trim()}”.
                   </Text>
                 )}
               {!connectionsLoading &&
@@ -2815,9 +2914,20 @@ const Scheduling = () => {
                       onClick={() => toggleConnection(conn.connection_id)}
                       mb={1}
                     >
-                      <Text fontSize="xs" color="gray.500">
-                        {expanded ? "?" : "?"}
-                      </Text>
+                      <Flex
+                        as="span"
+                        alignItems="center"
+                        justifyContent="center"
+                        color="gray.500"
+                        flexShrink={0}
+                        aria-hidden
+                      >
+                        {expanded ? (
+                          <MdExpandMore size={18} />
+                        ) : (
+                          <MdChevronRight size={18} />
+                        )}
+                      </Flex>
                       <Text fontSize="sm" fontWeight="bold" flex="1" truncate>
                         {conn.connection_name}
                       </Text>
@@ -2888,11 +2998,11 @@ const Scheduling = () => {
                                 {b.name}
                               </Text>
                               <Text fontSize="2xs" color="gray.500">
-                                {b.table_count} tables � {b.execution_order}
+                                {b.table_count} tables · {b.execution_order}
                                 {usedElsewhere && b.pipeline_name
-                                  ? ` � in ${b.pipeline_name}`
+                                  ? ` · in ${b.pipeline_name}`
                                   : usedHere
-                                    ? " � on this flow"
+                                    ? " · on this flow"
                                     : ""}
                               </Text>
                             </Box>
@@ -3000,6 +3110,18 @@ const Scheduling = () => {
                   flexWrap="nowrap"
                   overflowX="auto"
                 >
+                  {canRevokeActiveRun ? (
+                    <PipelineToolbarIcon
+                      label="Revoke flow"
+                      colorPalette="red"
+                      _hover={{ bg: "red.50", color: "red.600" }}
+                      onClick={() => void handleRevokePipelineRun()}
+                      loading={revokePipelineRun.isPending}
+                      flexShrink={0}
+                    >
+                      <MdBlock />
+                    </PipelineToolbarIcon>
+                  ) : null}
                   {!draftCanvasMode && activeRunId !== null && (
                     <PipelineToolbarIcon
                       label="Edit canvas"
@@ -3153,6 +3275,7 @@ const Scheduling = () => {
                       onSelectNode={setSelectedNode}
                       onClearSelection={() => setSelectedNode(null)}
                       onPushUndo={pushCanvasUndoEntry}
+                      onEnterDraftEdit={enterDraftCanvasEdit}
                     />
                   </Box>
                 </ReactFlowProvider>

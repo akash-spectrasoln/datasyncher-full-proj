@@ -153,6 +153,8 @@ def send_pipeline_flow_notification(run: PipelineRun) -> None:
 
     metadata = run.metadata if isinstance(run.metadata, dict) else {}
     error_message = metadata.get('error') if run.status == 'failed' else None
+    if run.status == 'revoked':
+        error_message = None
     batch_rows = parse_batch_rows_from_run_metadata(metadata)
 
     subject, text_body, html_body = build_pipeline_flow_email(

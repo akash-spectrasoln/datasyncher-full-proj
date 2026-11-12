@@ -1,17 +1,14 @@
 import ServerRoutes from "@/constants/server-routes";
 import AxiosInstance from "@/lib/axios/api-client";
-import {
-  type DatabricksSparkJobProvisionOutcome,
-  type Destination,
-} from "@/types/destination";
+import { type Destination } from "@/types/destination";
 import { type ErrorResponseType } from "@/types/error";
 
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 
-type CreateDestinationResponse = DatabricksSparkJobProvisionOutcome & {
+interface CreateDestinationResponse {
   message?: string;
   auth_url?: string;
-};
+}
 
 const createDestination = async (
   payload: Destination | FormData,

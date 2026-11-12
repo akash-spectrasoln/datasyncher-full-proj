@@ -68,6 +68,8 @@ spec:
               value: "50051"
             - name: PROXY_AGENT_HUB_MTLS_DIR
               value: "/etc/sap-proxy-agent-hub-client/mtls"
+            - name: PROXY_AGENT_HUB_GRPC_TIMEOUT_SECONDS
+              value: "120"
           volumeMounts:
             - name: sap-proxy-agent-hub-mtls-client
               mountPath: /etc/sap-proxy-agent-hub-client/mtls

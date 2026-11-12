@@ -148,8 +148,8 @@ export default function RuleStyleEditor({
         </HStack>
       </Grid>
 
-      {/* Highlight Scope Selection */}
-      {!isMultipleConditions && (
+      {/* Highlight Scope Selection - only for single-column rules without condition column */}
+      {!isMultipleConditions && !rule.condition_column_name && (
         <Flex align="center" gap={3} mt={0.5} minH="24px" wrap="wrap">
           <Text fontSize="xs" fontWeight="semibold" color="gray.600">
             Highlight Scope:

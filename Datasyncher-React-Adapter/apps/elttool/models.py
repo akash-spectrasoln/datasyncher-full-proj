@@ -1508,6 +1508,7 @@ class MigrationRecord(models.Model):
         ('in_progress', 'In Progress'),
         ('failed', 'Failed'),
         ('skipped', 'Skipped'),
+        ('revoked', 'Revoked'),
         ('deleted', 'Deleted'),
     ]
     
@@ -1780,6 +1781,7 @@ class PipelineRun(models.Model):
         ('running', 'Running'),
         ('completed', 'Completed'),
         ('failed', 'Failed'),
+        ('revoked', 'Revoked'),
         ('deleted', 'Deleted'),
     ]
 

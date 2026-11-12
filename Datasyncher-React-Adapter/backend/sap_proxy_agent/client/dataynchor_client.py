@@ -2,7 +2,7 @@ import grpc
 from google.protobuf.json_format import MessageToDict
 from google.protobuf.struct_pb2 import Struct
 
-from sap_proxy_agent.client.channel_factory import get_channel
+from sap_proxy_agent.client.channel_factory import get_channel, hub_grpc_call_timeout_seconds
 from sap_proxy_agent.generated import service_pb2, service_pb2_grpc
 
 
@@ -110,7 +110,9 @@ def test_sap_connection(src_type, cust_id, source_config):
         src_type=src_type,
     )
 
-    response = stub.TestSapConnection(request)
+    response = stub.TestSapConnection(
+        request, timeout=hub_grpc_call_timeout_seconds()
+    )
     if response.error_msg:
         raise ValueError(response.error_msg)
 

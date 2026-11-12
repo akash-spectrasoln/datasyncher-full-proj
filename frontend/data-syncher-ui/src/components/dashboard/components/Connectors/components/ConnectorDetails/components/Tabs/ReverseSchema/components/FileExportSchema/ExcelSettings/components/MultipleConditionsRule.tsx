@@ -37,6 +37,7 @@ import {
   findNodeAndParent,
   groupSelectedNodes,
   nodeToHumanSummary,
+  toggleDividerConjunction,
   toggleGroupConjunction,
   treeToConditions,
   ungroupNode,
@@ -728,7 +729,16 @@ export default function MultipleConditionsRule({
     onUpdateConditions(treeToConditions(nextTree));
   };
 
+  const handleToggleDivider = (parentGroupId: string, childIdx: number) => {
+    if (isEditingText) return;
+    isInternalEditRef.current = true;
+    const nextTree = toggleDividerConjunction(tree, parentGroupId, childIdx);
+    setTree(nextTree);
+    onUpdateConditions(treeToConditions(nextTree));
+  };
+
   const handleToggleConjunction = (groupId: string) => {
+    if (isEditingText) return;
     isInternalEditRef.current = true;
     const nextTree = toggleGroupConjunction(tree, groupId);
     setTree(nextTree);
@@ -1003,8 +1013,15 @@ export default function MultipleConditionsRule({
                       fontSize="10px"
                       fontWeight="bold"
                       borderRadius="full"
-                      onClick={() => handleToggleConjunction(parentGroup.id)}
-                      title={`Click to switch between AND and OR (currently ${parentGroup.conjunction.toUpperCase()})`}
+                      disabled={isEditingText}
+                      cursor={isEditingText ? "not-allowed" : "pointer"}
+                      opacity={isEditingText ? 0.6 : 1}
+                      onClick={() => handleToggleDivider(parentGroup.id, idx)}
+                      title={
+                        isEditingText
+                          ? "Cannot change operator while editing expression as text"
+                          : `Click to switch between AND and OR (currently ${parentGroup.conjunction.toUpperCase()})`
+                      }
                     >
                       {parentGroup.conjunction.toUpperCase()} ▾
                     </Button>
@@ -1104,8 +1121,15 @@ export default function MultipleConditionsRule({
                         fontSize="10px"
                         fontWeight="bold"
                         borderRadius="full"
+                        disabled={isEditingText}
+                        cursor={isEditingText ? "not-allowed" : "pointer"}
+                        opacity={isEditingText ? 0.6 : 1}
                         onClick={() => handleToggleConjunction(node.id)}
-                        title="Toggle group match logic"
+                        title={
+                          isEditingText
+                            ? "Cannot change operator while editing expression as text"
+                            : "Toggle group match logic"
+                        }
                       >
                         {node.conjunction.toUpperCase()} ▾
                       </Button>
@@ -1200,14 +1224,22 @@ export default function MultipleConditionsRule({
                     size="xs"
                     variant="outline"
                     colorPalette="gray"
+                    disabled={isEditingText}
+                    cursor={isEditingText ? "not-allowed" : "pointer"}
+                    opacity={isEditingText ? 0.6 : 1}
                     onClick={() => {
+                      if (isEditingText) return;
                       setIsSelectionMode(true);
                       setSelectedIds(new Set());
                     }}
                     fontSize="xs"
                     h="28px"
                     px={2.5}
-                    title="Select conditions to group together"
+                    title={
+                      isEditingText
+                        ? "Finish or cancel text edit first"
+                        : "Select conditions to group together"
+                    }
                   >
                     <IoMdFolderOpen fontSize="14px" /> Group...
                   </Button>
@@ -1217,10 +1249,21 @@ export default function MultipleConditionsRule({
                   size="xs"
                   variant="ghost"
                   colorPalette="gray"
-                  onClick={handleReset}
+                  disabled={isEditingText}
+                  cursor={isEditingText ? "not-allowed" : "pointer"}
+                  opacity={isEditingText ? 0.6 : 1}
+                  onClick={() => {
+                    if (isEditingText) return;
+                    handleReset();
+                  }}
                   fontSize="xs"
                   h="28px"
                   px={2}
+                  title={
+                    isEditingText
+                      ? "Finish or cancel text edit first"
+                      : undefined
+                  }
                 >
                   Reset
                 </Button>
@@ -1229,10 +1272,21 @@ export default function MultipleConditionsRule({
                   size="xs"
                   variant="outline"
                   colorPalette="brand"
-                  onClick={handleAddCondition}
+                  disabled={isEditingText}
+                  cursor={isEditingText ? "not-allowed" : "pointer"}
+                  opacity={isEditingText ? 0.6 : 1}
+                  onClick={() => {
+                    if (isEditingText) return;
+                    handleAddCondition();
+                  }}
                   fontSize="xs"
                   h="28px"
                   px={2.5}
+                  title={
+                    isEditingText
+                      ? "Finish or cancel text edit first"
+                      : undefined
+                  }
                 >
                   <IoMdAdd /> Add condition
                 </Button>

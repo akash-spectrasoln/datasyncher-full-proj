@@ -26,7 +26,8 @@ export type PipelineNodeRunVisualStatus =
   | "running"
   | "completed"
   | "failed"
-  | "skipped";
+  | "skipped"
+  | "revoked";
 
 export function pipelineNodeChrome(options: {
   selected?: boolean;
@@ -40,6 +41,8 @@ export function pipelineNodeChrome(options: {
     bg = PIPELINE_NODE.bgCompleted;
   } else if (runStatus === "failed") {
     bg = PIPELINE_NODE.bgFailed;
+  } else if (runStatus === "revoked") {
+    bg = "gray.50";
   }
 
   let borderColor: string = PIPELINE_NODE.border;
@@ -56,6 +59,8 @@ export function pipelineNodeChrome(options: {
     borderColor = "gray.300";
   } else if (runStatus === "skipped") {
     borderColor = "orange.200";
+  } else if (runStatus === "revoked") {
+    borderColor = "gray.300";
   } else if (isDraft) {
     borderColor = "orange.300";
   }

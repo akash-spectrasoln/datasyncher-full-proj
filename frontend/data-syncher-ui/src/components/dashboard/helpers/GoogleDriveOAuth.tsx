@@ -41,8 +41,6 @@ const isLocalhost =
   window.location.hostname === "127.0.0.1";
 const GOOGLE_DRIVE_AUTH_PATH = "/api/v1/source/googledrive/authorize/";
 const GOOGLE_DRIVE_CALLBACK_PATH = "/api/v1/source/googledrive/callback";
-const GOOGLE_DRIVE_OAUTH_TOKENS_PATH =
-  "/api/v1/source/googledrive/oauth-tokens/";
 
 const stripTrailingSlash = (value: string) => value.replace(/\/+$/, "");
 
@@ -82,18 +80,9 @@ const GoogleDriveOAuth: React.FC<GoogleDriveOAuthProps> = ({
     window.history.replaceState({}, document.title, window.location.pathname);
   };
 
-  // ─── Step 2: On mount, redeem oauth_state or handle legacy query tokens ──
+  // ─── Step 2: On mount, check if backend redirected back with tokens ──────
   useEffect(() => {
-    const redeemOAuthState = async (oauthState: string) => {
-      const response = await axios.get<GoogleDriveTokens>(
-        `${baseURL}${GOOGLE_DRIVE_OAUTH_TOKENS_PATH}`,
-        { params: { oauth_state: oauthState } },
-      );
-      return response.data;
-    };
-
     const params = new URLSearchParams(window.location.search);
-    const oauthState = params.get("oauth_state");
     const accessToken = params.get("access_token");
     const refreshToken = params.get("refresh_token");
     const tokenExpiresAt = params.get("token_expires_at") ?? undefined;
@@ -101,51 +90,35 @@ const GoogleDriveOAuth: React.FC<GoogleDriveOAuthProps> = ({
     const folderName = params.get("folder_name") ?? undefined;
     const error = params.get("oauth_error") || params.get("error");
 
-    if (oauthState || accessToken || refreshToken || error) {
+    // Clean URL immediately so app auth isn't affected by these params
+    if (accessToken || refreshToken || error) {
       cleanUrl();
     }
 
-    if (!oauthState && !accessToken && !refreshToken && !error) return;
+    // Not a callback — nothing to do
+    if (!accessToken && !refreshToken && !error) return;
 
+    // Backend reported an error
     if (error) {
       setStatus("error");
       setErrorMsg("Google authorization was denied.");
       return;
     }
 
-    if (handledRef.current) return;
-    handledRef.current = true;
-
-    const applyTokens = (tokens: GoogleDriveTokens) => {
+    // Backend sent us tokens — pass them up to the form
+    if (accessToken && !handledRef.current) {
+      handledRef.current = true;
       setStatus("done");
-      onTokensReceived({
-        access_token: tokens.access_token,
-        refresh_token: tokens.refresh_token ?? "",
-        token_expires_at: tokens.token_expires_at,
-        folder_id: tokens.folder_id ?? folderId,
-        folder_name: tokens.folder_name ?? folderName,
-      });
-    };
 
-    if (oauthState) {
-      redeemOAuthState(oauthState)
-        .then(applyTokens)
-        .catch(() => {
-          handledRef.current = false;
-          setStatus("error");
-          setErrorMsg("Google authorization session expired. Please try again.");
-        });
-      return;
-    }
-
-    if (accessToken) {
-      applyTokens({
+      const tokens: GoogleDriveTokens & Record<string, string | undefined> = {
         access_token: accessToken,
         refresh_token: refreshToken ?? "",
         token_expires_at: tokenExpiresAt,
         folder_id: folderId,
         folder_name: folderName,
-      });
+      };
+
+      onTokensReceived(tokens);
     }
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 

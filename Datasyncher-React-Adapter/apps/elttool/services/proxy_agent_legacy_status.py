@@ -45,13 +45,22 @@ def apply_legacy_statusdetails(status_data: dict[str, Any]) -> dict[str, Any]:
     if agent is None:
         raise ProgressValidationError(f"Unknown agent_uid={agent_uid!r}.")
 
-    try:
-        migration_session_id = int(status_data.get("migration_session_id"))
-        connection_id = int(status_data.get("connection_id"))
-    except (TypeError, ValueError) as exc:
-        raise ProgressValidationError(
-            "migration_session_id and connection_id must be integers."
-        ) from exc
+    def _as_int(raw: Any, label: str) -> int:
+        if raw is None or raw == "":
+            raise ProgressValidationError(f"{label} is required.")
+        if isinstance(raw, bool):
+            raise ProgressValidationError(f"{label} must be an integer.")
+        try:
+            if isinstance(raw, float) and raw.is_integer():
+                return int(raw)
+            return int(str(raw).strip())
+        except (TypeError, ValueError) as exc:
+            raise ProgressValidationError(
+                "migration_session_id and connection_id must be integers."
+            ) from exc
+
+    migration_session_id = _as_int(status_data.get("migration_session_id"), "migration_session_id")
+    connection_id = _as_int(status_data.get("connection_id"), "connection_id")
 
     job_name = str(status_data.get("job_name") or "").strip()
     if not job_name:

@@ -47,6 +47,7 @@ if ($ApplyManifests) {
   kubectl --context=$Context apply -f (Join-Path $k8s "deployments/sap-proxy-agent-hub.yaml") -n $Namespace
   kubectl --context=$Context apply -f (Join-Path $k8s "services/sap-proxy-agent-hub-svc.yaml") -n $Namespace
   kubectl --context=$Context apply -f (Join-Path $k8s "network-policies/allow-hub-to-django.yaml") -n $Namespace
+  kubectl --context=$Context apply -f (Join-Path $k8s "network-policies/allow-external-to-sap-proxy-hub-grpc.yaml") -n $Namespace
 }
 
 $dep = kubectl --context=$Context get deployment sap-proxy-agent-hub -n $Namespace -o name 2>$null

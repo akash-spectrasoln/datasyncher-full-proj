@@ -54,6 +54,7 @@ from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.settings import api_settings
 from rest_framework.status import HTTP_400_BAD_REQUEST
+from rest_framework.throttling import ScopedRateThrottle
 from rest_framework.views import APIView
 from apps.elttool.v1.permissions import IsInternalService
 from rest_framework_simplejwt.tokens import RefreshToken
@@ -7563,7 +7564,14 @@ class DestinationConfigSaveAPIView(APIView):
                     'data': encoded_data
                 }
 
-                response = requests.get(api_url, params=params, verify=False)
+                oauth_headers = _fastapi_headers()
+                response = requests.get(
+                    api_url,
+                    params=params,
+                    headers=oauth_headers,
+                    verify=False,
+                    timeout=migration_api_timeout_seconds(dst_name),
+                )
                 print(f"Google Drive HTTP Status: {response.status_code}")
                 print(f"Google Drive Raw Response: {response.text}")
 
@@ -7623,7 +7631,13 @@ class DestinationConfigSaveAPIView(APIView):
 
                 print(f"📩 Params sent: {params}")
 
-                response = requests.get(api_url, params=params, verify=False)
+                response = requests.get(
+                    api_url,
+                    params=params,
+                    headers=_fastapi_headers(),
+                    verify=False,
+                    timeout=migration_api_timeout_seconds(dst_name),
+                )
 
                 print(f"📊 Salesforce HTTP Status: {response.status_code}")
                 print(f"📄 Salesforce Raw Response: {response.text}")
@@ -8080,7 +8094,13 @@ class DestinationConfigUpdateAPIView(APIView):
                     'data': encoded_data
                 }
 
-                response = requests.get(api_url, params=params, verify=False)
+                response = requests.get(
+                    api_url,
+                    params=params,
+                    headers=_fastapi_headers(),
+                    verify=False,
+                    timeout=migration_api_timeout_seconds(dst_name),
+                )
                 print(f"📊 Google Drive HTTP Status: {response.status_code}")
                 print(f"📄 Google Drive Raw Response: {response.text}")
 
@@ -8330,7 +8350,13 @@ class DestinationConfigUpdateAPIView(APIView):
 
                 print(f"📩 Params sent to Salesforce auth: {params}")
 
-                response = requests.get(api_url, params=params, verify=False)
+                response = requests.get(
+                    api_url,
+                    params=params,
+                    headers=_fastapi_headers(),
+                    verify=False,
+                    timeout=migration_api_timeout_seconds(dst_name),
+                )
 
                 print(f"📊 Salesforce HTTP Status: {response.status_code}")
                 print(f"📄 Salesforce Raw Response: {response.text}")
@@ -11518,11 +11544,17 @@ class SourceConnectionCreateUpdateAPIView(APIView):
                     'state': state
                 }
 
-                response = requests.get(api_url, params={
-                    "redirect_uri": callback_url,
-                    "state": state,
-                    "data": encoded_data
-                }, verify=False, timeout=connection_auth_timeout)
+                response = requests.get(
+                    api_url,
+                    params={
+                        "redirect_uri": callback_url,
+                        "state": state,
+                        "data": encoded_data,
+                    },
+                    headers=_fastapi_headers(),
+                    verify=False,
+                    timeout=connection_auth_timeout,
+                )
 
                 if response.status_code == 200:
                     auth_url = response.json().get("auth_url")
@@ -11564,11 +11596,17 @@ class SourceConnectionCreateUpdateAPIView(APIView):
                     'state': state
                 }
 
-                response = requests.get(api_url, params={
-                    "redirect_uri": callback_url,
-                    "state": state,
-                    "data": encoded_data
-                }, verify=False, timeout=connection_auth_timeout)
+                response = requests.get(
+                    api_url,
+                    params={
+                        "redirect_uri": callback_url,
+                        "state": state,
+                        "data": encoded_data,
+                    },
+                    headers=_fastapi_headers(),
+                    verify=False,
+                    timeout=connection_auth_timeout,
+                )
 
                 if response.status_code == 200:
                     auth_url = response.json().get("auth_url")
@@ -11611,11 +11649,17 @@ class SourceConnectionCreateUpdateAPIView(APIView):
                     state = base64.b64encode(json.dumps(oauth_form_data).encode()).decode()
                     encoded_data = urllib.parse.quote(json.dumps(oauth_form_data))
 
-                    response = requests.get(api_url, params={
-                        "redirect_uri": callback_url,
-                        "state": state,
-                        "data": encoded_data
-                    }, verify=False, timeout=connection_auth_timeout)
+                    response = requests.get(
+                        api_url,
+                        params={
+                            "redirect_uri": callback_url,
+                            "state": state,
+                            "data": encoded_data,
+                        },
+                        headers=_fastapi_headers(),
+                        verify=False,
+                        timeout=connection_auth_timeout,
+                    )
 
                     if response.status_code == 200:
                         auth_url = response.json().get("auth_url")
@@ -11911,6 +11955,7 @@ class SourceConnectionCreateUpdateAPIView(APIView):
                             "state": state,
                             "data": encoded_data
                         },
+                        headers=_fastapi_headers(),
                         verify=False,
                         timeout=connection_auth_timeout,
                     )
@@ -12795,7 +12840,13 @@ class TestSourceConnectionAPIView(APIView):
                                 'state': state
                             }
 
-                            response = requests.get(validate_url, params=params, verify=False)
+                            response = requests.get(
+                                validate_url,
+                                params=params,
+                                headers=_fastapi_headers(),
+                                verify=False,
+                                timeout=test_auth_timeout,
+                            )
 
                             if response.status_code == 200:
                                 auth_url = response.json().get('auth_url')
@@ -16280,6 +16331,8 @@ class UserManagementAPIView(APIView):
 
 class UserProfileAPIView(APIView):
     permission_classes = [IsAuthenticated]  # Removed CheckTrialPeriod
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = "profile"
 
     def get(self, request):
         # Optimize query by refetching user with select_related to avoid N+1 queries
@@ -19994,7 +20047,7 @@ class UpdateSourceTableSelectionAPIView(APIView):
         except requests.exceptions.RequestException as scheduler_err:
             scheduler_warning = (
                 "Table selection was saved, but scheduler sync could not be updated "
-                f"because the scheduler service is unavailable: {scheduler_err}"
+                f"(scheduler job store temporarily unavailable — safe to retry): {scheduler_err}"
             )
             logger.warning(
                 "[UpdateSourceTableSelectionAPIView] Scheduler unavailable for job lookup/reschedule | "
@@ -23528,6 +23581,7 @@ class MigrationStatusAPIView(APIView):
 
 class InternalMigrationStatusPushAPIView(APIView):
     permission_classes = [IsInternalService]
+    throttle_classes = []
 
     def post(self, request, migration_session_id):
         try:
@@ -23545,6 +23599,20 @@ class InternalMigrationStatusPushAPIView(APIView):
             )
 
             push_migration_status_update(migration_session_id, data)
+
+            try:
+                from apps.elttool.services.pipeline_run_ws_push import (
+                    schedule_pipeline_run_ws_for_migration_session,
+                )
+
+                schedule_pipeline_run_ws_for_migration_session(
+                    int(migration_session_id),
+                )
+            except Exception:
+                logger.exception(
+                    "Pipeline run WS push after migration session=%s",
+                    migration_session_id,
+                )
 
             return Response(
                 {"message": "WebSocket update pushed successfully"},
@@ -23564,6 +23632,7 @@ class InternalConnectionActivityLogPushAPIView(APIView):
     Called when new logs are created to notify connected clients.
     """
     permission_classes = [IsInternalService]
+    throttle_classes = []
 
     def post(self, request, connection_id):
         try:
@@ -23647,6 +23716,7 @@ class InternalConnectionTableStatusPushAPIView(APIView):
     Called by migration-function when any table status changes.
     """
     permission_classes = [IsInternalService]
+    throttle_classes = []
 
     def post(self, request, connection_id):
         try:
@@ -23679,6 +23749,7 @@ class InternalUpdateSchemaStatusPushAPIView(APIView):
     Called by migration-function when schema listing jobs complete or fail.
     """
     permission_classes = [IsInternalService]
+    throttle_classes = []
 
     def post(self, request, connection_id):
         try:
@@ -23717,6 +23788,7 @@ class InternalCompanyConnectionsStatusPushAPIView(APIView):
     re-fetch /api/v1/home/ and refresh migration_status for all connections.
     """
     permission_classes = [IsInternalService]
+    throttle_classes = []
 
     def post(self, request, cmp_id):
         try:

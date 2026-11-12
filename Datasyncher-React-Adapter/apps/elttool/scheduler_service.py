@@ -38,6 +38,12 @@ from apscheduler.events import (
 from django.conf import settings
 import redis
 
+from apps.elttool.services.scheduler_jobstore_db import (
+    dispose_scheduler_jobstore_engine,
+    scheduler_jobstore_engine_options,
+    with_jobstore_db_retry,
+)
+
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,
@@ -56,10 +62,11 @@ if not scheduler_db_url:
         "Set it via environment (docker `env_file: .env.developer`)."
     )
 
-# Initialize APScheduler with PostgreSQL job store
+# Initialize APScheduler with PostgreSQL job store (pool_pre_ping + recycle — see scheduler_jobstore_db)
 jobstores = {
     'default': SQLAlchemyJobStore(
-        url=scheduler_db_url
+        url=scheduler_db_url,
+        engine_options=scheduler_jobstore_engine_options(),
     )
 }
 
@@ -155,20 +162,38 @@ class SchedulerRequestHandler(BaseHTTPRequestHandler):
         path = parsed_path.path
         
         if path == '/health':
-            self.send_response(200)
-            self.send_header('Content-Type', 'application/json')
-            self.end_headers()
-            response = {
-                'status': 'healthy',
-                'scheduler_running': scheduler.running,
-                'job_count': len(scheduler.get_jobs())
-            }
-            self.wfile.write(json.dumps(response).encode())
-        
+            try:
+                job_count = with_jobstore_db_retry(
+                    scheduler,
+                    lambda: len(scheduler.get_jobs()),
+                    context="health",
+                )
+                response = {
+                    'status': 'healthy',
+                    'scheduler_running': scheduler.running,
+                    'job_count': job_count,
+                }
+                self.send_response(200)
+                self.send_header('Content-Type', 'application/json')
+                self.end_headers()
+                self.wfile.write(json.dumps(response).encode())
+            except Exception as e:
+                logger.error(f"Health check failed: {e}", exc_info=True)
+                self.send_response(503)
+                self.send_header('Content-Type', 'application/json')
+                self.end_headers()
+                self.wfile.write(
+                    json.dumps({'status': 'unhealthy', 'message': str(e)}).encode()
+                )
+
         elif path.startswith('/jobs/get/'):
             job_id = path.split('/jobs/get/')[1]
             try:
-                job = scheduler.get_job(job_id)
+                job = with_jobstore_db_retry(
+                    scheduler,
+                    lambda: scheduler.get_job(job_id),
+                    context=f"get_job:{job_id}",
+                )
                 if job:
                     response = {
                         'status': 'success',
@@ -189,6 +214,7 @@ class SchedulerRequestHandler(BaseHTTPRequestHandler):
                 self.wfile.write(json.dumps(response).encode())
             except Exception as e:
                 logger.error(f"Error getting job: {e}", exc_info=True)
+                dispose_scheduler_jobstore_engine(scheduler)
                 self.send_response(500)
                 self.send_header('Content-Type', 'application/json')
                 self.end_headers()
@@ -197,7 +223,11 @@ class SchedulerRequestHandler(BaseHTTPRequestHandler):
         elif path == '/jobs/list':
             try:
                 jobs = []
-                for job in scheduler.get_jobs():
+                for job in with_jobstore_db_retry(
+                    scheduler,
+                    lambda: list(scheduler.get_jobs()),
+                    context="list_jobs",
+                ):
                     jobs.append({
                         'id': job.id,
                         'name': job.name,
@@ -211,6 +241,7 @@ class SchedulerRequestHandler(BaseHTTPRequestHandler):
                 self.wfile.write(json.dumps(response).encode())
             except Exception as e:
                 logger.error(f"Error listing jobs: {e}", exc_info=True)
+                dispose_scheduler_jobstore_engine(scheduler)
                 self.send_response(500)
                 self.send_header('Content-Type', 'application/json')
                 self.end_headers()
@@ -286,11 +317,15 @@ class SchedulerRequestHandler(BaseHTTPRequestHandler):
                     replace_existing
                 )
 
-                scheduler.add_job(
-                    func,
-                    trigger_type,
-                    **add_job_kwargs,
-                    **trigger_args
+                with_jobstore_db_retry(
+                    scheduler,
+                    lambda: scheduler.add_job(
+                        func,
+                        trigger_type,
+                        **add_job_kwargs,
+                        **trigger_args,
+                    ),
+                    context=f"add_job:{job_id}",
                 )
                 
                 logger.info(f"Job {job_id} added successfully.\n\n")
@@ -316,15 +351,23 @@ class SchedulerRequestHandler(BaseHTTPRequestHandler):
                 trigger_type = data.get('trigger_type', 'interval')
                 trigger_args = data.get('trigger_args', {})
                 
-                job = scheduler.get_job(job_id)
+                job = with_jobstore_db_retry(
+                    scheduler,
+                    lambda: scheduler.get_job(job_id),
+                    context=f"reschedule_get:{job_id}",
+                )
                 if not job:
                     self.send_response(404)
                     self.send_header('Content-Type', 'application/json')
                     self.end_headers()
                     self.wfile.write(json.dumps({'status': 'not_found'}).encode())
                     return
-                
-                job.reschedule(trigger=trigger_type, **trigger_args)
+
+                with_jobstore_db_retry(
+                    scheduler,
+                    lambda: job.reschedule(trigger=trigger_type, **trigger_args),
+                    context=f"reschedule:{job_id}",
+                )
                 logger.info(f"Job {job_id} rescheduled successfully.")
                 response = {'status': 'success', 'job_id': job_id}
                 self.send_response(200)
@@ -350,7 +393,11 @@ class SchedulerRequestHandler(BaseHTTPRequestHandler):
         if path.startswith('/jobs/remove/'):
             job_id = path.split('/jobs/remove/')[1]
             try:
-                scheduler.remove_job(job_id)
+                with_jobstore_db_retry(
+                    scheduler,
+                    lambda: scheduler.remove_job(job_id),
+                    context=f"remove_job:{job_id}",
+                )
                 logger.info(f"Job {job_id} removed successfully.")
                 response = {'status': 'success', 'job_id': job_id}
                 self.send_response(200)

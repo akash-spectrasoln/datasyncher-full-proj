@@ -99,6 +99,14 @@ def test_warehouse_cold_start_seconds_defaults_to_fifteen_minutes(monkeypatch):
     assert warehouse_cold_start_seconds() == 900
 
 
+def test_cluster_cold_start_seconds_defaults_to_twenty_minutes(monkeypatch):
+    monkeypatch.delenv("DATABRICKS_CLUSTER_COLD_START_SECONDS", raising=False)
+    monkeypatch.delenv("DATABRICKS_WAREHOUSE_COLD_START_SECONDS", raising=False)
+    from datasyncher_connections.databricks.connector import cluster_cold_start_seconds
+
+    assert cluster_cold_start_seconds() == 1200
+
+
 @patch("datasyncher_connections.databricks.connector.create_databricks_connection")
 def test_validate_databricks_sql_warehouse_success(mock_connect):
     mock_cursor = MagicMock()

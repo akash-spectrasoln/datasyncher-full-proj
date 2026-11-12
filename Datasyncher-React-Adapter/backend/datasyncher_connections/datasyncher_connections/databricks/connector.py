@@ -12,6 +12,7 @@ from typing import Any, Iterator
 
 _WAREHOUSE_POLL_SECONDS = 5
 _DEFAULT_WAREHOUSE_COLD_START_SECONDS = 900  # 15 minutes
+_DEFAULT_CLUSTER_COLD_START_SECONDS = 1200  # 20 minutes (all-purpose clusters often slower than SQL warehouses)
 
 
 def _env_int(name: str, default: int, *, minimum: int = 1) -> int:
@@ -35,6 +36,24 @@ def warehouse_cold_start_seconds() -> int:
         _DEFAULT_WAREHOUSE_COLD_START_SECONDS,
         minimum=60,
     )
+
+
+def cluster_cold_start_seconds() -> int:
+    """
+    Max wait for an all-purpose compute cluster to reach RUNNING.
+
+    Defaults to 20 minutes. Override with ``DATABRICKS_CLUSTER_COLD_START_SECONDS``.
+    Falls back to ``DATABRICKS_WAREHOUSE_COLD_START_SECONDS`` when the cluster var is unset.
+    """
+    raw = os.getenv("DATABRICKS_CLUSTER_COLD_START_SECONDS", "").strip()
+    if raw:
+        return _env_int(
+            "DATABRICKS_CLUSTER_COLD_START_SECONDS",
+            _DEFAULT_CLUSTER_COLD_START_SECONDS,
+            minimum=60,
+        )
+    warehouse_budget = warehouse_cold_start_seconds()
+    return max(warehouse_budget, _DEFAULT_CLUSTER_COLD_START_SECONDS)
 
 
 def warehouse_stopped_grace_seconds() -> int:
@@ -549,7 +568,7 @@ def ensure_cluster_compute_running(
     """
     cfg = normalize_databricks_config(config)
     cluster_id = _cluster_id_from_http_path(_required(cfg, "http_path"))
-    budget = int(budget_seconds if budget_seconds is not None else warehouse_cold_start_seconds())
+    budget = int(budget_seconds if budget_seconds is not None else cluster_cold_start_seconds())
     poll = max(2, int(poll_seconds))
     started = time.monotonic()
     start_requested = False
@@ -571,7 +590,7 @@ def ensure_cluster_compute_running(
                 raise DatabricksWarehouseUnavailable(
                     f"Databricks all-purpose compute cluster '{name}' stayed {state} "
                     f"for more than {budget}s. Start it in Databricks (Compute) or "
-                    f"increase DATABRICKS_WAREHOUSE_COLD_START_SECONDS."
+                    f"increase DATABRICKS_CLUSTER_COLD_START_SECONDS."
                 )
             time.sleep(poll)
             continue

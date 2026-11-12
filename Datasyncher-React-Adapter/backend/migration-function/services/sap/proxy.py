@@ -43,6 +43,35 @@ from services.sap.source import (
 logger = logging.getLogger(__name__)
 
 
+def _proxy_sts_update_details(
+    *,
+    job_name: Optional[str] = None,
+    migration_session_id: Optional[int] = None,
+    connection_id: Optional[int] = None,
+    cmp_id: Optional[int] = None,
+    user_id: Optional[int] = None,
+    log_id: Optional[int] = None,
+    session: Optional[int] = None,
+) -> dict[str, Any]:
+    """STS blob for agent status (integers, not empty strings)."""
+    out: dict[str, Any] = {}
+    if job_name:
+        out["job_name"] = str(job_name)
+    if migration_session_id is not None:
+        out["migration_session_id"] = int(migration_session_id)
+    if connection_id is not None:
+        out["connection_id"] = int(connection_id)
+    if cmp_id is not None:
+        out["cmp_id"] = int(cmp_id)
+    if user_id is not None:
+        out["user_id"] = int(user_id)
+    if log_id is not None:
+        out["log_id"] = int(log_id)
+    if session is not None:
+        out["session"] = int(session)
+    return out
+
+
 def is_proxy_connection(source_config: Dict[str, Any]) -> bool:
     """Return ``True`` when the source_config specifies proxy connection mode.
 
@@ -267,6 +296,7 @@ def _run_proxy_data_load(
     cmp_id: Optional[int] = None,
     user_id: Optional[int] = None,
     log_id: Optional[int] = None,
+    session: Optional[int] = None,
 ) -> bool:
     """Route a SAP load step through the proxy agent gRPC client.
 
@@ -303,14 +333,15 @@ def _run_proxy_data_load(
     source_conn      = _get_proxy_src_conn(source_config)
     destination_type = str(source_config.get("destination_type") or "adls")
 
-    details_for_sts_update = {
-        "migration_session_id": str(migration_session_id) if migration_session_id else "",
-        "job_name": str(job_name) if job_name else "",
-        "connection_id": str(connection_id) if connection_id else "",
-        "cmp_id": str(cmp_id) if cmp_id else "",
-        "user_id": str(user_id) if user_id else "",
-        "log_id": str(log_id) if log_id else "",
-    }
+    details_for_sts_update = _proxy_sts_update_details(
+        job_name=job_name,
+        migration_session_id=migration_session_id,
+        connection_id=connection_id,
+        cmp_id=cmp_id,
+        user_id=user_id,
+        log_id=log_id,
+        session=session,
+    )
 
     agent_adls_config = dict(adls_config or {})
     if agent_adls_config:
@@ -378,6 +409,7 @@ def run_proxy_load_step(
     cmp_id: Optional[int] = None,
     user_id: Optional[int] = None,
     log_id: Optional[int] = None,
+    session: Optional[int] = None,
 ) -> bool:
     """Execute a single load step through the proxy agent."""
     proxy_agent, _, _, _, _ = _get_proxy_credentials(source_config)
@@ -396,6 +428,7 @@ def run_proxy_load_step(
         cmp_id=cmp_id,
         user_id=user_id,
         log_id=log_id,
+        session=session,
     )
 
 
@@ -478,6 +511,7 @@ def run_proxy_batch_load(
     cmp_id: Optional[int] = None,
     user_id: Optional[int] = None,
     log_id: Optional[int] = None,
+    session: Optional[int] = None,
     adls_config: Optional[Dict[str, Any]] = None,
 ) -> bool:
     """Send a batch of tables to the proxy agent in a single gRPC call.
@@ -505,14 +539,15 @@ def run_proxy_batch_load(
         destination_config,
     )
 
-    details_for_sts_update = {
-        "migration_session_id": str(migration_session_id) if migration_session_id else "",
-        "job_name": str(job_name) if job_name else "",
-        "connection_id": str(connection_id) if connection_id else "",
-        "cmp_id": str(cmp_id) if cmp_id else "",
-        "user_id": str(user_id) if user_id else "",
-        "log_id": str(log_id) if log_id else "",
-    }
+    details_for_sts_update = _proxy_sts_update_details(
+        job_name=job_name,
+        migration_session_id=migration_session_id,
+        connection_id=connection_id,
+        cmp_id=cmp_id,
+        user_id=user_id,
+        log_id=log_id,
+        session=session,
+    )
 
     snowflake_mode = destination_type == "snowflake"
     if snowflake_mode and use_delta_rpc:

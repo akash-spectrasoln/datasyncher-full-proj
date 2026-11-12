@@ -690,22 +690,78 @@ export function buildAutoArrangeUpdates(
   return updates;
 }
 
-/** Find edge whose midpoint is nearest to a flow coordinate (for insert-on-drop). */
+function distancePointToSegment(
+  point: { x: number; y: number },
+  a: { x: number; y: number },
+  b: { x: number; y: number },
+): number {
+  const dx = b.x - a.x;
+  const dy = b.y - a.y;
+  const lenSq = dx * dx + dy * dy;
+  if (lenSq < 1e-6) {
+    return Math.hypot(point.x - a.x, point.y - a.y);
+  }
+  const t = Math.max(
+    0,
+    Math.min(1, ((point.x - a.x) * dx + (point.y - a.y) * dy) / lenSq),
+  );
+  const projX = a.x + t * dx;
+  const projY = a.y + t * dy;
+  return Math.hypot(point.x - projX, point.y - projY);
+}
+
+/** Canvas positions for insert-on-drop: prefer live React Flow, then saved x/y, then layout. */
+export function buildPipelineNodePositionMap(
+  pipelineNodes: PipelineNodeDto[],
+  flowPositionsById: Map<number, { x: number; y: number }>,
+  edges: PipelineEdgeDto[],
+): Map<number, { x: number; y: number }> {
+  const layout = layoutPipelineLR(pipelineNodes, edges);
+  const map = new Map<number, { x: number; y: number }>();
+  for (const pn of pipelineNodes) {
+    const flow = flowPositionsById.get(pn.id);
+    if (flow) {
+      map.set(pn.id, flow);
+      continue;
+    }
+    if (pn.x !== 0 || pn.y !== 0) {
+      map.set(pn.id, { x: pn.x, y: pn.y });
+      continue;
+    }
+    map.set(pn.id, layout.get(pn.id) ?? { x: pn.x, y: pn.y });
+  }
+  return map;
+}
+
+/**
+ * Find dependency edge to split when dropping a batch (insert-between).
+ * Uses distance to the edge segment on the **visible** canvas, not layout midpoints alone.
+ * Skips insert when the drop is closer to a node (parallel add near a batch).
+ */
 export function findEdgeInsertTarget(
   point: { x: number; y: number },
-  _nodes: PipelineNodeDto[],
+  pipelineNodes: PipelineNodeDto[],
   edges: PipelineEdgeDto[],
   positions: Map<number, { x: number; y: number }>,
-  threshold = 90,
+  threshold = 72,
 ): { from_node_id: number; to_node_id: number } | null {
+  let nearestNodeDist = Infinity;
+  for (const node of pipelineNodes) {
+    const pos = positions.get(node.id);
+    if (!pos) continue;
+    nearestNodeDist = Math.min(
+      nearestNodeDist,
+      Math.hypot(point.x - pos.x, point.y - pos.y),
+    );
+  }
+
   let best: { from_node_id: number; to_node_id: number; dist: number } | null =
     null;
   for (const edge of edges) {
     const from = positions.get(edge.from_node_id);
     const to = positions.get(edge.to_node_id);
     if (!from || !to) continue;
-    const mid = { x: (from.x + to.x) / 2, y: (from.y + to.y) / 2 };
-    const dist = Math.hypot(point.x - mid.x, point.y - mid.y);
+    const dist = distancePointToSegment(point, from, to);
     if (dist <= threshold && (!best || dist < best.dist)) {
       best = {
         from_node_id: edge.from_node_id,
@@ -715,6 +771,7 @@ export function findEdgeInsertTarget(
     }
   }
   if (!best) return null;
+  if (best.dist >= nearestNodeDist) return null;
   return {
     from_node_id: best.from_node_id,
     to_node_id: best.to_node_id,

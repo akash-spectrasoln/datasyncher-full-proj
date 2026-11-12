@@ -10,8 +10,10 @@ from django.conf import settings
 
 DEFAULT_MIGRATION_API_TIMEOUT_SECONDS = 30
 DEFAULT_SALESFORCE_AUTH_REQUEST_TIMEOUT_SECONDS = 120
+DEFAULT_SAP_ODATA_AUTH_REQUEST_TIMEOUT_SECONDS = 120
 DEFAULT_DATABRICKS_WAREHOUSE_COLD_START_SECONDS = 900
 SALESFORCE_CONNECTOR_NAMES = frozenset({"Salesforce", "SalesforceSandbox"})
+SAP_ODATA_CONNECTOR_NAMES = frozenset({"SAPOData"})
 
 
 def databricks_warehouse_cold_start_seconds() -> int:
@@ -45,6 +47,14 @@ def _migration_api_timeout_for_connector(connector_name: str) -> int:
             except ValueError:
                 pass
         return DEFAULT_SALESFORCE_AUTH_REQUEST_TIMEOUT_SECONDS
+    if name in SAP_ODATA_CONNECTOR_NAMES:
+        raw = os.getenv("SAP_ODATA_AUTH_REQUEST_TIMEOUT_SECONDS", "").strip()
+        if raw:
+            try:
+                return max(60, int(raw))
+            except ValueError:
+                pass
+        return DEFAULT_SAP_ODATA_AUTH_REQUEST_TIMEOUT_SECONDS
     return DEFAULT_MIGRATION_API_TIMEOUT_SECONDS
 
 

@@ -17,3 +17,8 @@ spec:
       port: 50052
       targetPort: 50052
       protocol: TCP
+    # TCP forward (sidecar on hub pod) → sap-proxy-agent-unary-svc:50053 — same LB IP as :50051
+    - name: grpc-unary
+      port: 50053
+      targetPort: 50053
+      protocol: TCP

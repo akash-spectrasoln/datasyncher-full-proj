@@ -121,14 +121,34 @@ export default function Form() {
       setIsLoading(false);
       const payload =
         err && typeof err === "object" && "response" in err
-          ? (err as AxiosError<{ error?: string }>).response
+          ? (err as AxiosError<{ error?: string; detail?: string }>).response
           : null;
       const status = payload?.status;
+      const bodyDetail =
+        payload?.data?.detail ||
+        (err && typeof err === "object" && "detail" in err
+          ? String((err as { detail?: string }).detail)
+          : null);
       const message =
         payload?.data?.error ||
+        bodyDetail ||
         (err && typeof err === "object" && "error" in err
           ? String((err as { error?: string }).error)
           : null);
+      const isThrottled =
+        status === 429 ||
+        (typeof bodyDetail === "string" &&
+          bodyDetail.toLowerCase().includes("throttled")) ||
+        (typeof message === "string" &&
+          message.toLowerCase().includes("throttled"));
+
+      if (isThrottled) {
+        setHasError(true);
+        setErrorMessage(
+          "Too many requests. Please wait a minute and try again.",
+        );
+        return;
+      }
 
       if (status === 403 || message?.toLowerCase().includes("verify")) {
         setUnverifiedEmail(data.username);

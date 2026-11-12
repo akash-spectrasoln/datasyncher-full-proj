@@ -30,7 +30,7 @@ PIPELINE_ORPHAN_MIGRATION_SECONDS = 10 * 60
 PIPELINE_QUEUED_ORPHAN_SECONDS = 90
 _ORPHAN_ACTIVE_STATUSES = ("in_progress", "pending", "started", "running", "queued")
 _PIPELINE_RUN_JOB = re.compile(r"^pipeline_run_(\d+)")
-_TERMINAL_RUN_STATUSES = ("deleted", "failed", "completed")
+_TERMINAL_RUN_STATUSES = ("deleted", "failed", "completed", "revoked")
 _PIPELINE_TASK_NAMES = {
     "apps.elttool.tasks.execute_pipeline_run",
     "apps.elttool.tasks.start_pipeline_level",

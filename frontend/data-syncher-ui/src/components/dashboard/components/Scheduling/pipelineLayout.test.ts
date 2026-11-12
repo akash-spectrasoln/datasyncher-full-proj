@@ -5,6 +5,7 @@ import { type PipelineEdgeDto, type PipelineNodeDto } from "@/types/pipeline";
 import {
   buildAutoArrangeUpdates,
   computeRootNodeIds,
+  findEdgeInsertTarget,
   getParentBatchName,
   layoutPipelineLR,
   resolvePipelineNodePosition,
@@ -347,5 +348,19 @@ describe("pipelineLayout", () => {
     expect(
       updates.every((u) => Number.isInteger(u.x) && Number.isInteger(u.y)),
     ).toBe(true);
+  });
+
+  it("findEdgeInsertTarget uses canvas positions and skips when drop is on a node", () => {
+    const positions = new Map<number, { x: number; y: number }>([
+      [1, { x: 0, y: 80 }],
+      [2, { x: 300, y: 200 }],
+      [3, { x: 520, y: 200 }],
+    ]);
+    expect(
+      findEdgeInsertTarget({ x: 300, y: 200 }, nodes, edges, positions),
+    ).toBeNull();
+    expect(
+      findEdgeInsertTarget({ x: 410, y: 200 }, nodes, edges, positions),
+    ).toEqual({ from_node_id: 2, to_node_id: 3 });
   });
 });

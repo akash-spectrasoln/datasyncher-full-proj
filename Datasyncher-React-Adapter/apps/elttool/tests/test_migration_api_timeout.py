@@ -7,6 +7,7 @@ from django.test import SimpleTestCase
 
 from apps.elttool.v1.utils import (
     DEFAULT_MIGRATION_API_TIMEOUT_SECONDS,
+    DEFAULT_SAP_ODATA_AUTH_REQUEST_TIMEOUT_SECONDS,
     DEFAULT_SALESFORCE_AUTH_REQUEST_TIMEOUT_SECONDS,
     migration_api_timeout_seconds,
 )
@@ -19,6 +20,14 @@ class MigrationApiTimeoutTests(SimpleTestCase):
             migration_api_timeout_seconds(None),
             DEFAULT_MIGRATION_API_TIMEOUT_SECONDS,
         )
+
+    def test_sap_odata_uses_longer_default(self):
+        with mock.patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("SAP_ODATA_AUTH_REQUEST_TIMEOUT_SECONDS", None)
+            self.assertEqual(
+                migration_api_timeout_seconds("SAPOData"),
+                DEFAULT_SAP_ODATA_AUTH_REQUEST_TIMEOUT_SECONDS,
+            )
 
     def test_salesforce_uses_longer_default(self):
         with mock.patch.dict(os.environ, {}, clear=False):

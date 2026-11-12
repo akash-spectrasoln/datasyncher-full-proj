@@ -11,6 +11,7 @@ import {
   type PipelineRunMode,
   type PipelineRunNodeDetail,
   type PipelineRunOverall,
+  type PipelineRunStatus,
 } from "@/types/pipeline";
 
 /** True when Validate has published a runnable topology (Run Now / schedule). */
@@ -99,8 +100,60 @@ export function isPipelineNodeStartingUp(
         : [];
 
   if (activeIds.includes(node.node_id)) return true;
-  // Single-wave runs often have empty current_node_ids until the session is created.
-  return (run.overall?.nodes_running ?? 0) > 0 || activeIds.length === 0;
+  return (run.overall?.nodes_running ?? 0) > 0;
+}
+
+/** Run is live but orchestrator has not dispatched this node yet (plan slot / Celery queue). */
+export function isPipelineNodeAwaitingDispatch(
+  run: Pick<
+    PipelineRunDetail,
+    | "status"
+    | "current_node_id"
+    | "current_node_ids"
+    | "waiting_for_flow_slot"
+    | "overall"
+  >,
+  node: Pick<
+    PipelineRunNodeDetail,
+    "node_id" | "status" | "migration_session_id"
+  >,
+): boolean {
+  if (run.waiting_for_flow_slot) return false;
+  const runStatus = resolvePipelineRunStatus(run);
+  if (runStatus !== "running" && runStatus !== "in_progress") return false;
+  if (
+    node.migration_session_id !== null &&
+    node.migration_session_id !== undefined
+  ) {
+    return false;
+  }
+  const nodeStatus = String(node.status || "").toLowerCase();
+  if (!["pending", "waiting", ""].includes(nodeStatus)) return false;
+  if (isPipelineNodeStartingUp(run, node)) return false;
+
+  const activeIds =
+    run.current_node_ids && run.current_node_ids.length > 0
+      ? run.current_node_ids
+      : run.current_node_id !== null && run.current_node_id !== undefined
+        ? [run.current_node_id]
+        : [];
+  const nodesRunning = run.overall?.nodes_running ?? 0;
+  return activeIds.length === 0 && nodesRunning === 0;
+}
+
+/** Celery retry in flight — show "retrying" instead of a fleeting failed badge. */
+export function pipelineNodeRetryBadgeLabel(
+  node: Pick<PipelineRunNodeDetail, "migration_status" | "status">,
+): string | null {
+  const tables = node.migration_status?.tables ?? [];
+  for (const table of tables) {
+    const msg = String(table.error_message || "").toLowerCase();
+    if (!msg.includes("retrying")) continue;
+    const match = msg.match(/retrying\s*\(\d+\s*\/\s*\d+\)/);
+    if (match) return match[0].replace(/\s+/g, "");
+    return "retrying";
+  }
+  return null;
 }
 
 export function pipelineNodeStartupMessage(
@@ -120,8 +173,11 @@ export function pipelineNodeStartupMessage(
   if (run.waiting_for_flow_slot) {
     return "Queued — waiting for a free flow slot on your plan…";
   }
+  if (isPipelineNodeAwaitingDispatch(run, node)) {
+    return "Waiting to dispatch — flow slot, orchestrator, and worker fleet…";
+  }
   if (isPipelineNodeStartingUp(run, node)) {
-    return "Starting task — preparing workers and migration session…";
+    return "Starting task — opening migration session and workers…";
   }
   return null;
 }
@@ -145,6 +201,9 @@ export function executionLogNodeBadge(
   if (runMode === "draft") {
     return { label: "Draft", colorPalette: "orange", variant: "subtle" };
   }
+  if (run && isPipelineNodeAwaitingDispatch(run, node)) {
+    return { label: "waiting", colorPalette: "purple", variant: "subtle" };
+  }
   if (run && isPipelineNodeStartingUp(run, node)) {
     return { label: "starting", colorPalette: "blue", variant: "subtle" };
   }
@@ -152,6 +211,13 @@ export function executionLogNodeBadge(
     return null;
   }
   const status = String(node.status).toLowerCase();
+  const retryLabel = pipelineNodeRetryBadgeLabel(node);
+  if (
+    retryLabel &&
+    (status === "running" || status === "in_progress" || status === "pending")
+  ) {
+    return { label: retryLabel, colorPalette: "orange", variant: "subtle" };
+  }
   return {
     label: String(node.status),
     colorPalette: pipelineStatusColor(node.status),
@@ -163,6 +229,7 @@ export function pipelineStatusColor(status: string): string {
   const s = status.toLowerCase();
   if (s === "completed") return "green";
   if (s === "failed" || s === "timeout") return "red";
+  if (s === "revoked") return "gray";
   if (s === "queued" || s === "waiting") return "purple";
   if (s === "running" || s === "in_progress") return "blue";
   if (s === "skipped") return "orange";
@@ -266,6 +333,7 @@ export function resolvePipelineRunStatus(
     return top;
   }
 
+  if (top === "revoked") return "revoked";
   if (top === "failed" || top === "timeout") return top;
   if (rolled === "failed" || rolled === "timeout") return rolled;
   if (top === "completed") return "completed";
@@ -278,17 +346,40 @@ export function computeNodeProgress(overall: PipelineRunOverall): number {
   const resolved =
     overall.nodes_completed +
     (overall.nodes_failed ?? 0) +
-    (overall.nodes_skipped ?? 0);
+    (overall.nodes_skipped ?? 0) +
+    (overall.nodes_revoked ?? 0);
   return Math.round((resolved / overall.nodes_total) * 100);
 }
 
 export function computeTableProgress(overall: PipelineRunOverall): number {
   if (overall.tables_total <= 0) return 0;
-  const resolved = overall.tables_completed + (overall.tables_failed ?? 0);
+  const resolved =
+    overall.tables_completed +
+    (overall.tables_failed ?? 0) +
+    (overall.tables_revoked ?? 0);
   return Math.round((resolved / overall.tables_total) * 100);
 }
 
 /** Statuses that should keep Scheduling live-polling (no pipeline-run WebSocket). */
+/** Maps a run row to `PipelineDetail.latest_run_status` (pipeline picker). */
+export function latestRunStatusForPicker(
+  run: Pick<
+    PipelineRunDetail,
+    "status" | "overall" | "waiting_for_flow_slot"
+  >,
+): PipelineRunStatus | null {
+  const resolved = resolvePipelineRunStatus(run);
+  if (resolved === "running" || resolved === "in_progress") return "running";
+  if (resolved === "queued" || resolved === "waiting") return "queued";
+  if (resolved === "completed" || resolved === "revoked" || resolved === "deleted") {
+    return resolved;
+  }
+  if (resolved === "failed" || resolved === "timeout") {
+    return "failed";
+  }
+  return null;
+}
+
 export function isLivePipelineRunStatus(
   status: string | undefined | null,
 ): boolean {
@@ -298,8 +389,20 @@ export function isLivePipelineRunStatus(
   );
 }
 
-/** Poll cadence while a run is queued/running. Kept short — there is no WS push. */
-export const PIPELINE_RUN_LIVE_REFETCH_MS = 2000;
+/** Poll cadence while a run is queued/running (table progress is not on pipeline-run WS). */
+export const PIPELINE_RUN_LIVE_REFETCH_MS = 10_000;
+/** @deprecated Pipeline-run WS only fires on PipelineRun row saves; do not slow REST below live cadence. */
+export const PIPELINE_RUN_WS_FALLBACK_REFETCH_MS = 45_000;
+
+export function isApiThrottleError(error: unknown): boolean {
+  if (!error || typeof error !== "object") return false;
+  const record = error as Record<string, unknown>;
+  if (record.status === 429) return true;
+  const detail = record.detail;
+  return (
+    typeof detail === "string" && detail.toLowerCase().includes("throttled")
+  );
+}
 
 export function pipelineRunRefetchInterval(
   status: string | undefined,

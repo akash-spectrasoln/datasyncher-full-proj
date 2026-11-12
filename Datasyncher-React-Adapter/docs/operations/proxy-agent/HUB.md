@@ -1,6 +1,7 @@
 # SAP proxy agent gRPC hub
 
 Dedicated pod for agent mTLS on **`:50051`** (`StartDataLoad`, metadata, **`ReportProgress`**).  
+The hub **LoadBalancer** also exposes **`:50053`** (legacy unary RPCs): the hub image runs **socat** (`entrypoint.sh`) TCP-forwarding to `sap-proxy-agent-unary-svc:50053` on the **same external IP** as `:50051`.  
 Progress relay target: Django `POST /api/v1/internal/proxy-agent/migration-progress/` (same as [GATEWAY.md](./GATEWAY.md)).
 
 ## Deploy (batch)

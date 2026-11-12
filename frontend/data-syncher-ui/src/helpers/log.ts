@@ -40,6 +40,7 @@ export const getUiState = (
       return "in_progress";
     if (["p", "w", "warning"].includes(normalizedUiState)) return "warning";
     if (["skipped"].includes(normalizedUiState)) return "skipped";
+    if (["revoked"].includes(normalizedUiState)) return "revoked";
     return normalizedUiState;
   }
 
@@ -71,6 +72,8 @@ export const getUiState = (
     return "in_progress";
   if (["w", "warning"].includes(lowerStatus)) return "warning";
   if (["skipped"].includes(lowerStatus)) return "skipped";
+  if (["revoked"].includes(lowerStatus)) return "revoked";
+  if (lowerMessage.includes("flow revoked")) return "revoked";
 
   if (
     lowerMessage.includes("drop and reload") ||

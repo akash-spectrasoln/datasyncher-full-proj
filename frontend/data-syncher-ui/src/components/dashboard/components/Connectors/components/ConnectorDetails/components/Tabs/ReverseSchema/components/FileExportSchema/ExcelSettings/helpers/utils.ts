@@ -10,45 +10,13 @@ import {
   conditionsToTree,
   nodeToHumanSummary,
 } from "./groupModelUtils";
-import { type ColumnDataType } from "./types";
+import {
+  type ColumnDataType,
+  getColumnDataType,
+  stripFormulaQuotes,
+} from "./types";
 
-export const getColumnDataType = (
-  typeStr: string | undefined,
-): ColumnDataType => {
-  if (!typeStr) return "text";
-  const lower = typeStr.toLowerCase();
-  if (
-    lower.includes("number") ||
-    lower.includes("int") ||
-    lower.includes("float") ||
-    lower.includes("double") ||
-    lower.includes("decimal") ||
-    lower.includes("numeric") ||
-    lower.includes("real")
-  ) {
-    return "numeric";
-  }
-  if (
-    lower.includes("date") ||
-    lower.includes("time") ||
-    lower.includes("timestamp")
-  ) {
-    return "datetime";
-  }
-  if (lower.includes("bool")) {
-    return "boolean";
-  }
-  return "text";
-};
-
-export const stripFormulaQuotes = (val?: string): string => {
-  if (!val) return "";
-  const trimmed = String(val).trim();
-  if (trimmed.startsWith('"') && trimmed.endsWith('"') && trimmed.length >= 2) {
-    return trimmed.slice(1, -1).replace(/""/g, '"');
-  }
-  return val;
-};
+export { getColumnDataType, stripFormulaQuotes };
 
 export const formatCellIsFormulaValue = (
   val: string,
@@ -471,15 +439,17 @@ export const cleanRulePayload = (
     base.target_columns = rule.target_columns;
   }
 
-  if (rule.condition_column_name) {
-    base.condition_column_name = rule.condition_column_name;
-  }
-
   if (rule.stop_if_true !== undefined) {
     base.stop_if_true = rule.stop_if_true;
   }
 
-  base.highlight_scope = rule.highlight_scope || "cell";
+  if (rule.condition_column_name) {
+    base.condition_column_name = rule.condition_column_name;
+    base.highlight_scope =
+      rule.highlight_scope === "entire_row" ? "entire_row" : "selected_columns";
+  } else {
+    base.highlight_scope = rule.highlight_scope || "cell";
+  }
 
   const cleanStyle = (
     s: ExcelDifferentialStyle | undefined,

@@ -38,6 +38,39 @@ const FileExportPreviewTable = ({
     return columns.filter((c) => c.toLowerCase().includes(q));
   }, [columns, search]);
 
+  const columnWidths = useMemo(() => {
+    const map: Record<string, number> = {};
+    for (const col of visibleColumns) {
+      let maxLen = col.length;
+      for (let i = 0; i < Math.min(rows.length, 30); i++) {
+        const val = rows[i]?.[col];
+        if (val !== null && val !== undefined) {
+          maxLen = Math.max(maxLen, String(val).length);
+        }
+      }
+      // Compact width: ~7.5px per character + 16px padding, clamped between 70px and 280px
+      const width = Math.min(Math.max(Math.ceil(maxLen * 7.5 + 16), 70), 280);
+      map[col] = width;
+    }
+    return map;
+  }, [visibleColumns, rows]);
+
+  const gridTemplate = useMemo(() => {
+    if (!visibleColumns.length) return "1fr";
+    return visibleColumns
+      .map((col) => `${columnWidths[col] || 70}px`)
+      .join(" ");
+  }, [visibleColumns, columnWidths]);
+
+  const totalMinWidth = useMemo(() => {
+    if (!visibleColumns.length) return "100%";
+    const total = visibleColumns.reduce(
+      (sum, col) => sum + (columnWidths[col] || 70),
+      0,
+    );
+    return `${Math.max(total + 16, 120)}px`;
+  }, [visibleColumns, columnWidths]);
+
   // eslint-disable-next-line react-hooks/incompatible-library
   const virtualizer = useVirtualizer({
     count: rows.length,
@@ -121,8 +154,10 @@ const FileExportPreviewTable = ({
           </Flex>
         </Flex>
         <Box ref={parentRef} overflow="auto" flex="1" w="100%" minH={0}>
-          <Box minW={`${Math.max(visibleColumns.length, 1) * 120}px`}>
-            <Flex
+          <Box minW={totalMinWidth} w="100%">
+            <Box
+              display="grid"
+              gridTemplateColumns={gridTemplate}
               px={2}
               py={2}
               bg="gray.50"
@@ -136,17 +171,19 @@ const FileExportPreviewTable = ({
               color="gray.700"
             >
               {visibleColumns.map((col) => (
-                <Box key={col} minW="120px" px={1} truncate title={col}>
+                <Box key={col} px={1.5} minW={0} truncate title={col}>
                   {col}
                 </Box>
               ))}
-            </Flex>
+            </Box>
             <Box h={`${virtualizer.getTotalSize()}px`} position="relative">
               {virtualizer.getVirtualItems().map((vItem) => {
                 const row = rows[vItem.index];
                 return (
-                  <Flex
+                  <Box
                     key={vItem.index}
+                    display="grid"
+                    gridTemplateColumns={gridTemplate}
                     position="absolute"
                     top={0}
                     left={0}
@@ -158,17 +195,27 @@ const FileExportPreviewTable = ({
                     fontSize="xs"
                     borderBottomWidth={1}
                     borderColor="gray.100"
-                    align="center"
+                    alignItems="center"
                     _hover={{ bg: "gray.50/80" }}
                   >
-                    {visibleColumns.map((col) => (
-                      <Box key={col} minW="120px" px={1} truncate>
-                        {row[col] === null || row[col] === undefined
+                    {visibleColumns.map((col) => {
+                      const cellVal =
+                        row[col] === null || row[col] === undefined
                           ? ""
-                          : String(row[col])}
-                      </Box>
-                    ))}
-                  </Flex>
+                          : String(row[col]);
+                      return (
+                        <Box
+                          key={col}
+                          px={1.5}
+                          minW={0}
+                          truncate
+                          title={cellVal}
+                        >
+                          {cellVal}
+                        </Box>
+                      );
+                    })}
+                  </Box>
                 );
               })}
             </Box>

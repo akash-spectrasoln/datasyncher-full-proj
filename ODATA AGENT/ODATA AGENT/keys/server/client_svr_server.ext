@@ -1,4 +1,0 @@
-basicConstraints = critical, CA:false
-keyUsage = critical, digitalSignature, keyEncipherment
-extendedKeyUsage = clientAuth, serverAuth
-subjectAltName = DNS:client_svr_server, DNS:localhost, IP:127.0.0.1

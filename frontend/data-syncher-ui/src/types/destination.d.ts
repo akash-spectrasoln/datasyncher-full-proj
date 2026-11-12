@@ -16,13 +16,6 @@ export interface NewDestinationFormState {
   destinationName: string;
 }
 
-export type DatabricksSparkJobProvisionOutcome = {
-  databricks_spark_job_provision_error?: string | null;
-  databricks_spark_job_provision_status?: string | null;
-  databricks_spark_job_name?: string | null;
-  databricks_spark_job_id?: number | null;
-};
-
 export interface Destination {
   dst: string;
   name: string;
@@ -31,11 +24,6 @@ export interface Destination {
   is_file_based?: boolean;
   supports_notification_groups?: boolean;
 }
-
-export type DestinationSaveResponse = DatabricksSparkJobProvisionOutcome & {
-  message?: string;
-  auth_url?: string;
-};
 
 type AuditUser = {
   user_id?: number;

@@ -487,10 +487,12 @@ def rollup_pipeline_overall(nodes_payload: list, run_status: str) -> dict:
     nodes_failed = sum(1 for n in nodes_payload if n.get('status') in ('failed', 'timeout'))
     nodes_running = sum(1 for n in nodes_payload if n.get('status') in ('running', 'in_progress'))
     nodes_skipped = sum(1 for n in nodes_payload if n.get('status') == 'skipped')
+    nodes_revoked = sum(1 for n in nodes_payload if n.get('status') == 'revoked')
 
     tables_completed = 0
     tables_total = 0
     tables_failed = 0
+    tables_revoked = 0
     for node in nodes_payload:
         mig = node.get('migration_status') or {}
         tables = mig.get('tables') or []
@@ -505,9 +507,13 @@ def rollup_pipeline_overall(nodes_payload: list, run_status: str) -> dict:
                 tables_completed += 1
             elif status_icon in ('failed', 'error'):
                 tables_failed += 1
+            elif status_icon == 'revoked':
+                tables_revoked += 1
 
     derived_status = run_status
-    if run_status == 'running':
+    if run_status == 'revoked':
+        derived_status = 'revoked'
+    elif run_status == 'running':
         # Keep the run "running" while nodes or tables are still active (incl. Celery retry).
         if nodes_running > 0:
             derived_status = 'running'
@@ -522,8 +528,10 @@ def rollup_pipeline_overall(nodes_payload: list, run_status: str) -> dict:
         'nodes_failed': nodes_failed,
         'nodes_running': nodes_running,
         'nodes_skipped': nodes_skipped,
+        'nodes_revoked': nodes_revoked,
         'tables_completed': tables_completed,
         'tables_total': tables_total,
         'tables_failed': tables_failed,
+        'tables_revoked': tables_revoked,
         'status': derived_status,
     }

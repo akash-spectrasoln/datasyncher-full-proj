@@ -183,6 +183,8 @@ const ServerRoutes = {
     runs: (pipelineId: number) => `pipelines/${pipelineId}/runs/`,
     runDetail: (pipelineId: number, runId: number) =>
       `pipelines/${pipelineId}/runs/${runId}/`,
+    revokeRun: (pipelineId: number, runId: number) =>
+      `pipelines/${pipelineId}/runs/${runId}/revoke/`,
   },
   s3: {
     listFiles: () => "s3/list-files/",

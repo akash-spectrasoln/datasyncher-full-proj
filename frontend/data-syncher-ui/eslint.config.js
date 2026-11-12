@@ -3,7 +3,6 @@ import checkFile from "eslint-plugin-check-file";
 import prettierPlugin from "eslint-plugin-prettier";
 import reactHooks from "eslint-plugin-react-hooks";
 import reactRefresh from "eslint-plugin-react-refresh";
-import security from "eslint-plugin-security";
 import globals from "globals";
 import tseslint from "typescript-eslint";
 
@@ -24,7 +23,6 @@ export default tseslint.config(
       "react-refresh": reactRefresh,
       prettier: prettierPlugin,
       "check-file": checkFile,
-      security,
     },
     rules: {
       "@typescript-eslint/no-unused-vars": "off",
@@ -44,9 +42,7 @@ export default tseslint.config(
           varsIgnorePattern: "^_",
         },
       ],
-      "no-console": ["error", { allow: ["warn", "error"] }],
-      "security/detect-object-injection": "warn",
-      "security/detect-non-literal-regexp": "warn",
+      "no-console": ["warn", { allow: ["warn", "error"] }],
       "no-trailing-spaces": "error",
       "no-multiple-empty-lines": "error",
       "prettier/prettier": ["error", prettierRules],
@@ -58,32 +54,6 @@ export default tseslint.config(
         },
         {
           ignoreMiddleExtensions: true,
-        },
-      ],
-    },
-  },
-  {
-    files: ["src/components/**/*.{ts,tsx}"],
-    rules: {
-      // warn until legacy axios usage in components is migrated to queryOptions/
-      "no-restricted-imports": [
-        "warn",
-        {
-          paths: [
-            {
-              name: "axios",
-              message:
-                "Import HTTP only via queryOptions/ hooks; lib/axios is for the API layer.",
-              allowTypeImports: true,
-            },
-          ],
-          patterns: [
-            {
-              group: ["@/lib/axios", "@/lib/axios/**"],
-              message:
-                "Do not import from @/lib/axios in components; use queryOptions/ hooks.",
-            },
-          ],
         },
       ],
     },

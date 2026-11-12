@@ -235,9 +235,10 @@ REST_FRAMEWORK = {
         'rest_framework.throttling.UserRateThrottle',
     ],
     'DEFAULT_THROTTLE_RATES': {
-        'anon': '100/hour',
-        'user': '1000/hour',
+        'anon': env('DRF_ANON_THROTTLE_RATE', default='100/hour'),
+        'user': env('DRF_USER_THROTTLE_RATE', default='1000/hour'),
         'auth': '10/minute',
+        'profile': '120/minute',
     },
     'DEFAULT_PAGINATION_CLASS': 'datasyncher.pagination.CustomPagination',
     'PAGE_SIZE': 10,

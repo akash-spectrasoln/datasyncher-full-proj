@@ -29,6 +29,15 @@ from sap_proxy_agent.hub.mtls_paths import (
 
 logger = logging.getLogger("sap_proxy_agent_hub.grpc")
 
+
+def _hub_agent_rpc_timeout_seconds() -> float:
+    raw = (os.environ.get("HUB_AGENT_RPC_TIMEOUT_SECONDS") or "120").strip()
+    try:
+        return max(30.0, float(raw))
+    except ValueError:
+        return 120.0
+
+
 # Loaded once at startup - never re-read per request.
 ca_authority: CertificateAuthority | None = None
  
@@ -297,7 +306,9 @@ class Datasynchorservice(service_pb2_grpc.DatasynchorServicer):
             return service_pb2.Metadata_Response()
          
         try:
-            result = await asyncio.wait_for(future, timeout=30)
+            result = await asyncio.wait_for(
+                future, timeout=_hub_agent_rpc_timeout_seconds()
+            )
         except asyncio.TimeoutError:
             pending_requests.pop(request_id, None)
             context.set_code(grpc.StatusCode.DEADLINE_EXCEEDED)
@@ -378,7 +389,9 @@ class Datasynchorservice(service_pb2_grpc.DatasynchorServicer):
  
         # 4. wait for agent response
         try:
-            result = await asyncio.wait_for(future, timeout=30)
+            result = await asyncio.wait_for(
+                future, timeout=_hub_agent_rpc_timeout_seconds()
+            )
  
         except asyncio.TimeoutError:
             pending_requests.pop(request_id, None)
@@ -424,7 +437,9 @@ class Datasynchorservice(service_pb2_grpc.DatasynchorServicer):
  
         # 4. wait for agent response
         try:
-            result = await asyncio.wait_for(future, timeout=30)
+            result = await asyncio.wait_for(
+                future, timeout=_hub_agent_rpc_timeout_seconds()
+            )
  
         except asyncio.TimeoutError:
             pending_requests.pop(request_id, None)
@@ -469,7 +484,9 @@ class Datasynchorservice(service_pb2_grpc.DatasynchorServicer):
 
         # 4. wait for agent response
         try:
-            result = await asyncio.wait_for(future, timeout=30)
+            result = await asyncio.wait_for(
+                future, timeout=_hub_agent_rpc_timeout_seconds()
+            )
  
         except asyncio.TimeoutError:
             pending_requests.pop(request_id, None)

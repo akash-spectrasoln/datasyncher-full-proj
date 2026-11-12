@@ -77,6 +77,28 @@ def push_connection_table_status_update(connection_id, payload):
     )
 
 
+def push_pipeline_run_status_update(run_id, payload):
+    channel_layer = get_channel_layer()
+    async_to_sync(channel_layer.group_send)(
+        f"pipeline_run_{run_id}",
+        {
+            "type": "pipeline_run_update",
+            "payload": payload,
+        },
+    )
+
+
+def push_pipeline_runs_list_update(pipeline_id, payload):
+    channel_layer = get_channel_layer()
+    async_to_sync(channel_layer.group_send)(
+        f"pipeline_runs_{pipeline_id}",
+        {
+            "type": "pipeline_runs_update",
+            "payload": payload,
+        },
+    )
+
+
 def push_update_schema_status(connection_id, payload):
     # Send update schema status updates immediately
     channel_layer = get_channel_layer()

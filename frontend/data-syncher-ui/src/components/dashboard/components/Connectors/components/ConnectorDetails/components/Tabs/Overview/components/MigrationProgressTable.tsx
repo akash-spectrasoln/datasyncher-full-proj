@@ -2,7 +2,7 @@ import { useMemo } from "react";
 
 import { Box, Flex, Image, Table, Text } from "@chakra-ui/react";
 
-import { MdWarning } from "react-icons/md";
+import { MdBlock, MdWarning } from "react-icons/md";
 
 import { format } from "date-fns";
 import { useOutletContext } from "react-router";
@@ -88,6 +88,7 @@ const MigrationProgressTable = ({
         "p",
         "w",
         "skipped",
+        "revoked",
       ].includes(normalizedState)
     );
   });
@@ -177,12 +178,13 @@ const MigrationProgressTable = ({
               ["failed", "error", "f", "e"].includes(normalizedState);
             const isWarning = ["warning", "p", "w"].includes(normalizedState);
             const isSkipped = ["skipped"].includes(normalizedState);
+            const isRevoked = ["revoked"].includes(normalizedState);
             const isPending =
               normalizedState === "in_progress" ||
               normalizedState === "pending" ||
               normalizedState === "i" ||
               normalizedState === "running" ||
-              (!isSuccess && !isFailed && !isWarning && !isSkipped);
+              (!isSuccess && !isFailed && !isWarning && !isSkipped && !isRevoked);
 
             const displayError = resolveTableRowDisplayError(
               table,
@@ -260,6 +262,13 @@ const MigrationProgressTable = ({
                       <Box color="orange.500">
                         <MdWarning size={20} />
                       </Box>
+                    )}
+                    {isRevoked && (
+                      <Tooltip content="Revoked" showArrow>
+                        <Box color="gray.500" title="Revoked">
+                          <MdBlock size={20} />
+                        </Box>
+                      </Tooltip>
                     )}
                     {isSkipped &&
                       (showErrorTooltip ? (

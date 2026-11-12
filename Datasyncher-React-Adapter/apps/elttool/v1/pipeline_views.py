@@ -264,6 +264,7 @@ def _teardown_pipeline_flow_fleet(run_id: int) -> None:
 _TERMINAL_PIPELINE_RUN_STATUSES = frozenset({
     'completed',
     'failed',
+    'revoked',
     'cancelled',
     'canceled',
 })
@@ -1134,7 +1135,7 @@ def _peek_migration_session(
         overall = (data.get('overall_status') or '').lower()
         if overall == 'completed':
             return overall, data
-        if overall in ('failed', 'deleted') and not still_running:
+        if overall in ('failed', 'deleted', 'revoked') and not still_running:
             return overall, data
         if not still_running and terminal_statuses:
             if any(str(status).lower() == 'failed' for status in terminal_statuses):
@@ -1353,7 +1354,7 @@ def _pipeline_run_participating_node_ids(
 
     status = (run_status or '').lower()
     # Completed/failed history: never invent newer canvas nodes.
-    if status in ('completed', 'failed'):
+    if status in ('completed', 'failed', 'revoked'):
         return []
 
     snapshot = pipeline.validated_graph if isinstance(pipeline.validated_graph, dict) else None
@@ -5354,6 +5355,40 @@ class PipelineRunDetailView(APIView):
         pipeline = _get_pipeline_for_user(request, pipeline_id)
         run = get_object_or_404(PipelineRun, id=run_id, pipeline=pipeline)
         return Response(_build_pipeline_run_detail(run, include_migration_status=True))
+
+
+class PipelineRunRevokeView(APIView):
+    permission_classes = [IsAuthenticated, IsAnalystOrAdmin]
+
+    def post(self, request, pipeline_id, run_id):
+        pipeline = _get_pipeline_for_user(request, pipeline_id)
+        run = get_object_or_404(PipelineRun, id=run_id, pipeline=pipeline)
+        if run.status not in ('queued', 'running'):
+            return Response(
+                {
+                    'error': (
+                        f'Run {run_id} is not active (status={run.status}). '
+                        'Only queued or running runs can be revoked.'
+                    ),
+                },
+                status=status.HTTP_409_CONFLICT,
+            )
+        from apps.elttool.services.pipeline_run_revoke_service import (
+            revoke_pipeline_run,
+        )
+
+        result = revoke_pipeline_run(
+            run,
+            triggered_by_user_id=getattr(request.user, 'id', None),
+        )
+        run.refresh_from_db()
+        return Response(
+            {
+                **result,
+                'run': _build_pipeline_run_summary(run, reconcile_running=False),
+            },
+            status=status.HTTP_200_OK,
+        )
 
 
 class PipelineValidateView(APIView):

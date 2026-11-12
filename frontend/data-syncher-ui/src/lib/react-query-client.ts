@@ -15,9 +15,6 @@ export const queryClient = new QueryClient({
     queries: {
       refetchOnWindowFocus: false,
       retry: false,
-      // Avoid refetch storms on remount/navigation; screens can override.
-      staleTime: 30_000,
-      gcTime: 5 * 60_000,
     },
   },
   queryCache: new QueryCache({

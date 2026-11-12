@@ -71,6 +71,7 @@ def relay_progress_to_django(
         forward_headers["Idempotency-Key"] = idempotency_key
 
     url = f"{_django_base_url()}/api/v1/internal/proxy-agent/migration-progress/"
+    event = str(body.get("event") or "")
     try:
         with httpx.Client(timeout=60.0) as client:
             resp = client.post(url, content=raw_body, headers=forward_headers)
@@ -78,7 +79,29 @@ def relay_progress_to_django(
             data = resp.json()
         except json.JSONDecodeError:
             data = {"accepted": False, "error": resp.text[:500]}
+        if resp.status_code >= 400 or not data.get("accepted"):
+            logger.warning(
+                "[ReportProgress] django relay rejected agent_uid=%s event=%s "
+                "http=%s accepted=%s error=%s",
+                agent_uid,
+                event,
+                resp.status_code,
+                data.get("accepted"),
+                data.get("error") or data.get("message"),
+            )
+        else:
+            logger.info(
+                "[ReportProgress] django relay ok agent_uid=%s event=%s http=%s",
+                agent_uid,
+                event,
+                resp.status_code,
+            )
         return resp.status_code, data
     except httpx.RequestError as exc:
-        logger.error("Django progress relay failed agent_uid=%s error=%s", agent_uid, exc)
-        return 502, {"accepted": False, "error": "Upstream unavailable."}
+        logger.error(
+            "[ReportProgress] django relay failed agent_uid=%s event=%s error=%s",
+            agent_uid,
+            event,
+            exc,
+        )
+        return 502, {"accepted": False, "error": "upstream unavailable."}

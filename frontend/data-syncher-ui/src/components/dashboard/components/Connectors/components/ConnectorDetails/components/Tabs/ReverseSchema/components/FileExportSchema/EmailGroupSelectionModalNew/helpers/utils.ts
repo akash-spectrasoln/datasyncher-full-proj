@@ -1,5 +1,5 @@
 export const getPathLabel = (
-  dest?: string,
+  dest: string,
   customPathLabel?: string | null,
 ): string => {
   if (customPathLabel) return customPathLabel;
@@ -79,6 +79,8 @@ export const renderTemplateText = (
     (destinationName ? `${destinationName} Connection` : "Source Connection");
   const comp = companyName || "Datasyncher";
   const source = sourceDisplayName || "Source Data";
+  const columns =
+    columnsCount !== undefined ? String(columnsCount) : "";
 
   return template
     .replace(/\{table\}/g, tableName || "Table")
@@ -89,7 +91,7 @@ export const renderTemplateText = (
     .replace(/\{company\}/g, comp)
     .replace(/\{source\}/g, source)
     .replace(/\{service\}/g, source)
-    .replace(/\{columns\}/g, String(columnsCount ?? ""));
+    .replace(/\{columns\}/g, columns);
 };
 
 export const renderSubject = (

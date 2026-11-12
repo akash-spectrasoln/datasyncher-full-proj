@@ -98,6 +98,24 @@ def user_owns_migration_session(user, migration_session_id) -> bool:
         return bool(getattr(user, "cmp_id", None))
 
 
+def user_owns_pipeline_run(user, run_id) -> bool:
+    if not user or not getattr(user, "is_authenticated", False):
+        return False
+    if getattr(user, "is_superuser", False):
+        return True
+    from apps.elttool.models import PipelineRun
+
+    try:
+        run = PipelineRun.objects.select_related("pipeline").only(
+            "id",
+            "pipeline__cmp_id",
+        ).get(pk=run_id)
+    except PipelineRun.DoesNotExist:
+        return False
+    return user_belongs_to_company(user, run.pipeline.cmp_id)
+
+
 user_owns_connection_async = sync_to_async(user_owns_connection)
 user_belongs_to_company_async = sync_to_async(user_belongs_to_company)
 user_owns_migration_session_async = sync_to_async(user_owns_migration_session)
+user_owns_pipeline_run_async = sync_to_async(user_owns_pipeline_run)

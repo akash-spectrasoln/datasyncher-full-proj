@@ -3,8 +3,11 @@ Django client for interacting with the APScheduler service container.
 This replaces direct scheduler access from views.
 """
 import os
-import requests
+import time
 import logging
+from typing import Optional
+
+import requests
 from django.conf import settings
 
 logger = logging.getLogger(__name__)
@@ -20,6 +23,27 @@ def get_scheduler_service_url() -> str:
 
 class SchedulerClient:
     """Client for interacting with APScheduler service"""
+
+    _TRANSIENT_HTTP = frozenset({500, 502, 503, 504})
+
+    @staticmethod
+    def _get_with_transient_retry(url: str, *, attempts: int = 2) -> requests.Response:
+        last_response: Optional[requests.Response] = None
+        for attempt in range(attempts):
+            response = requests.get(url, timeout=10)
+            last_response = response
+            if response.status_code not in SchedulerClient._TRANSIENT_HTTP:
+                return response
+            if attempt < attempts - 1:
+                logger.warning(
+                    "Scheduler GET transient %s for %s; retrying (%s/%s)",
+                    response.status_code,
+                    url,
+                    attempt + 2,
+                    attempts,
+                )
+                time.sleep(0.35)
+        return last_response  # type: ignore[return-value]
     
     @staticmethod
     def _make_request(method, endpoint, **kwargs):
@@ -98,7 +122,7 @@ class SchedulerClient:
         """Get job information. Returns None if job not found (matches APScheduler behavior)"""
         url = f"{get_scheduler_service_url()}/jobs/get/{job_id}"
         try:
-            response = requests.get(url, timeout=10)
+            response = SchedulerClient._get_with_transient_retry(url)
             # 404 is a valid response when job doesn't exist - return None
             if response.status_code == 404:
                 # Try to parse JSON if available, but return None regardless

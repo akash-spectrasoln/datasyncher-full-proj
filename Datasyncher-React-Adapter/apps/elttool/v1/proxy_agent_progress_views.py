@@ -44,6 +44,7 @@ class InternalProxyAgentMigrationProgressAPIView(APIView):
 
     permission_classes = [IsInternalProxyAgentGateway]
     authentication_classes = []
+    throttle_classes = []
 
     def post(self, request):
         raw_body = request.body or b""
@@ -82,14 +83,19 @@ class InternalProxyAgentMigrationProgressAPIView(APIView):
             or ""
         )
 
+        ts_header = request.headers.get("X-Agent-Timestamp") or ""
+        sig_header = request.headers.get("X-Agent-Signature") or ""
+        require_agent_hmac = bool(ts_header.strip() or sig_header.strip())
+
         try:
             result = ingest_proxy_agent_progress(
                 agent_uid=agent_uid,
                 body=body,
                 raw_body=raw_body,
-                timestamp_header=request.headers.get("X-Agent-Timestamp") or "",
-                signature_header=request.headers.get("X-Agent-Signature") or "",
+                timestamp_header=ts_header,
+                signature_header=sig_header,
                 idempotency_key=str(idempotency_key).strip() or None,
+                require_agent_hmac=require_agent_hmac,
             )
         except ProgressAuthError as exc:
             logger.warning(

@@ -2,7 +2,7 @@ from django.db import transaction
 from django.db.models.signals import pre_save, post_save
 from django.dispatch import receiver
 import logging
-from .models import SourceTableSelection, Log, ScheduledJob, MigrationRecord
+from .models import SourceTableSelection, Log, ScheduledJob, MigrationRecord, PipelineRun
 
 logger = logging.getLogger(__name__)
 
@@ -106,4 +106,42 @@ def push_admin_ops_on_migration_status_change(sender, instance, **kwargs):
         except Exception as exc:
             logger.error("Failed to push admin ops snapshot: %s", exc)
 
+    def trigger_pipeline_run_ws():
+        from apps.elttool.models import PipelineRun
+        from apps.elttool.services.pipeline_run_job_names import (
+            pipeline_run_id_from_job_name,
+        )
+        from apps.elttool.services.pipeline_run_ws_push import (
+            schedule_pipeline_run_ws_push,
+        )
+
+        run_id = pipeline_run_id_from_job_name(instance.job_name)
+        if not run_id:
+            return
+        try:
+            pipeline_id = (
+                PipelineRun.objects.only("pipeline_id")
+                .values_list("pipeline_id", flat=True)
+                .get(pk=run_id)
+            )
+        except PipelineRun.DoesNotExist:
+            return
+        schedule_pipeline_run_ws_push(run_id, pipeline_id)
+
     transaction.on_commit(trigger_ops_push)
+    transaction.on_commit(trigger_pipeline_run_ws)
+
+
+@receiver(post_save, sender=PipelineRun)
+def push_pipeline_run_ws_on_save(sender, instance, **kwargs):
+    run_id = instance.id
+    pipeline_id = instance.pipeline_id
+
+    def schedule_push():
+        from apps.elttool.services.pipeline_run_ws_push import (
+            schedule_pipeline_run_ws_push,
+        )
+
+        schedule_pipeline_run_ws_push(run_id, pipeline_id)
+
+    transaction.on_commit(schedule_push)

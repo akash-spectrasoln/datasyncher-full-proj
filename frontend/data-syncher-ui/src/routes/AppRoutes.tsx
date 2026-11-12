@@ -3,6 +3,8 @@ import { lazy } from "react";
 import { Navigate, createBrowserRouter } from "react-router";
 
 import ProtectedRoute from "@/components/auth/ProtectedRoute";
+import DashboardIndex from "@/components/dashboard/DashboardIndex";
+import ConnectorConfiguration from "@/components/dashboard/components/Connectors/components/NewConnector/components/ConnectorConfiguration/ConnectorConfiguration";
 import ClientRoutes from "@/constants/client-routes";
 import NotFound from "@/shared/NotFound";
 import RouteError from "@/shared/RouteError";
@@ -32,15 +34,6 @@ import {
 } from "./DestinationRoutes";
 import { AuthLayout, DashboardLayout } from "./LayoutRoutes";
 
-const DashboardIndex = lazy(
-  () => import("@/components/dashboard/DashboardIndex"),
-);
-const ConnectorConfiguration = lazy(
-  () =>
-    import(
-      "@/components/dashboard/components/Connectors/components/NewConnector/components/ConnectorConfiguration/ConnectorConfiguration"
-    ),
-);
 const Plans = lazy(
   () => import("@/components/dashboard/components/Plans/Plans"),
 );
@@ -138,11 +131,7 @@ export const router = createBrowserRouter([
           },
           {
             path: `${ClientRoutes.CONNECTORS.ROOT}/${ClientRoutes.CONNECTORS.ADD}/*`,
-            element: (
-              <ProtectedRoute permission="can_view_connectors">
-                <NewConnector />
-              </ProtectedRoute>
-            ),
+            element: <NewConnector />,
           },
           {
             path: `${ClientRoutes.CONNECTORS.ROOT}/${ClientRoutes.CONNECTORS.EDIT_CONFIGURATION}/:connectionId`,
@@ -150,11 +139,7 @@ export const router = createBrowserRouter([
           },
           {
             path: `${ClientRoutes.CONNECTORS.ROOT}/${ClientRoutes.CONNECTORS.EDIT}/:connectionId`,
-            element: (
-              <ProtectedRoute permission="can_view_connectors">
-                <ConnectorDetails />
-              </ProtectedRoute>
-            ),
+            element: <ConnectorDetails />,
             children: [
               {
                 index: true,
@@ -224,9 +209,12 @@ export const router = createBrowserRouter([
             ),
           },
           {
-            // No dedicated permission key in API; sidebar shows Support for all authenticated users.
             path: ClientRoutes.SUPPORT,
-            element: <Support />,
+            element: (
+              <ProtectedRoute permission="can_access_billing">
+                <Support />
+              </ProtectedRoute>
+            ),
           },
           /** Start User Settings Routes */
           {
@@ -239,19 +227,11 @@ export const router = createBrowserRouter([
           },
           {
             path: `${ClientRoutes.USER_SETTINGS.ROOT}/${ClientRoutes.USER_SETTINGS.USERS}/${ClientRoutes.USER_SETTINGS.USER_ADD}`,
-            element: (
-              <ProtectedRoute permission="can_view_users">
-                <UserForm mode="add" />
-              </ProtectedRoute>
-            ),
+            element: <UserForm mode="add" />,
           },
           {
             path: `${ClientRoutes.USER_SETTINGS.ROOT}/${ClientRoutes.USER_SETTINGS.USERS}/${ClientRoutes.USER_SETTINGS.USER_EDIT}/:userId`,
-            element: (
-              <ProtectedRoute permission="can_view_users">
-                <UserForm mode="edit" />
-              </ProtectedRoute>
-            ),
+            element: <UserForm mode="edit" />,
           },
           {
             path: `${ClientRoutes.USER_SETTINGS.ROOT}/${ClientRoutes.USER_SETTINGS.PROFILE}`,

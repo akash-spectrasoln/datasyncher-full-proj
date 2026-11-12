@@ -36,6 +36,8 @@ Legacy **per-connection** auto-sync (`ScheduledJob`, `connection.time_frequency`
 
 Django web workers do **not** run the scheduler; they call the scheduler HTTP API (`scheduler-service:5000`).
 
+The `apscheduler` pod stores jobs in Postgres via `SQLAlchemyJobStore` with **`pool_pre_ping`**, **`pool_recycle`** (aligned with Django `CONN_MAX_AGE`), and TCP keepalives — see `apps/elttool/services/scheduler_jobstore_db.py`.
+
 ---
 
 ## Startup reconcile (after rollout)

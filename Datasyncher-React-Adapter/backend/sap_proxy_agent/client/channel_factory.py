@@ -14,6 +14,15 @@ from sap_proxy_agent.client.hub_target import grpc_server_target
 logger = logging.getLogger(__name__)
 
 
+def hub_grpc_call_timeout_seconds() -> int:
+    """Django/MF → hub gRPC deadline; must be ≤ hub wait for agent."""
+    raw = (os.environ.get("PROXY_AGENT_HUB_GRPC_TIMEOUT_SECONDS") or "120").strip()
+    try:
+        return max(30, int(raw))
+    except ValueError:
+        return 120
+
+
 def _host_from_grpc_target(target: str) -> str:
     """Return host part of ``host:port`` (supports IPv6 ``[addr]:port``)."""
     t = (target or "").strip()

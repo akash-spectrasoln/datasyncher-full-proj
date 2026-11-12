@@ -169,6 +169,11 @@ def _trigger_ws(migration_session_id: int, connection_id: int, *, activity: bool
         )
         if data and not error:
             push_migration_status_update(migration_session_id, data)
+            from apps.elttool.services.pipeline_run_ws_push import (
+                schedule_pipeline_run_ws_for_migration_session,
+            )
+
+            schedule_pipeline_run_ws_for_migration_session(migration_session_id)
         trigger_connection_ws_status_update(connection_id)
         if activity:
             trigger_connection_activity_log_update(connection_id)
@@ -649,17 +654,19 @@ def ingest_proxy_agent_progress(
     timestamp_header: str,
     signature_header: str,
     idempotency_key: Optional[str] = None,
+    require_agent_hmac: bool = True,
 ) -> dict[str, Any]:
     agent = ProxyAgent.objects.filter(agent_uid=agent_uid).select_related("cmp").first()
     if agent is None:
         raise ProgressAuthError("Unknown agent.")
 
-    verify_agent_progress_signature(
-        agent,
-        timestamp_header=timestamp_header,
-        signature_header=signature_header,
-        raw_body=raw_body,
-    )
+    if require_agent_hmac:
+        verify_agent_progress_signature(
+            agent,
+            timestamp_header=timestamp_header,
+            signature_header=signature_header,
+            raw_body=raw_body,
+        )
 
     idem = (idempotency_key or body.get("idempotency_key") or "").strip()
     if idem:

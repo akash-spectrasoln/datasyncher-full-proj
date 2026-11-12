@@ -4,6 +4,7 @@ import {
   Field,
   Flex,
   Grid,
+  HStack,
   IconButton,
   NativeSelect,
   Text,
@@ -118,6 +119,8 @@ export default function RuleCard({
             .filter(Boolean)
         : [];
 
+  const isScopeSelectedColumns = rule.highlight_scope !== "entire_row";
+
   return (
     <Box
       id={`excel-rule-${index}`}
@@ -217,6 +220,121 @@ export default function RuleCard({
                         color="gray.600"
                         mb={0.5}
                       >
+                        Apply Highlight To
+                      </Field.Label>
+                      <HStack gap={3} h="28px" align="center">
+                        {/* Chosen Columns Option */}
+                        <Flex
+                          align="center"
+                          gap={1.5}
+                          cursor="pointer"
+                          userSelect="none"
+                          onClick={() =>
+                            onUpdateRule(index, {
+                              highlight_scope: "selected_columns",
+                              target_columns:
+                                selectedCols.length > 0
+                                  ? selectedCols
+                                  : colNames[0]
+                                    ? [colNames[0]]
+                                    : [],
+                              column_name: (selectedCols.length > 0
+                                ? selectedCols
+                                : colNames[0]
+                                  ? [colNames[0]]
+                                  : []
+                              ).join(","),
+                            })
+                          }
+                        >
+                          <Box
+                            w="13px"
+                            h="13px"
+                            borderRadius="full"
+                            border="1.5px solid"
+                            borderColor={
+                              isScopeSelectedColumns ? "brand.500" : "gray.300"
+                            }
+                            bg="white"
+                            display="flex"
+                            alignItems="center"
+                            justifyContent="center"
+                          >
+                            {isScopeSelectedColumns && (
+                              <Box
+                                w="5px"
+                                h="5px"
+                                borderRadius="full"
+                                bg="brand.500"
+                              />
+                            )}
+                          </Box>
+                          <Text
+                            fontSize="xs"
+                            color="gray.700"
+                            fontWeight="medium"
+                            whiteSpace="nowrap"
+                          >
+                            Chosen Columns
+                          </Text>
+                        </Flex>
+
+                        {/* Entire Row Option */}
+                        <Flex
+                          align="center"
+                          gap={1.5}
+                          cursor="pointer"
+                          userSelect="none"
+                          onClick={() =>
+                            onUpdateRule(index, {
+                              highlight_scope: "entire_row",
+                            })
+                          }
+                        >
+                          <Box
+                            w="13px"
+                            h="13px"
+                            borderRadius="full"
+                            border="1.5px solid"
+                            borderColor={
+                              !isScopeSelectedColumns ? "brand.500" : "gray.300"
+                            }
+                            bg="white"
+                            display="flex"
+                            alignItems="center"
+                            justifyContent="center"
+                          >
+                            {!isScopeSelectedColumns && (
+                              <Box
+                                w="5px"
+                                h="5px"
+                                borderRadius="full"
+                                bg="brand.500"
+                              />
+                            )}
+                          </Box>
+                          <Text
+                            fontSize="xs"
+                            color="gray.700"
+                            fontWeight="medium"
+                            whiteSpace="nowrap"
+                          >
+                            Entire Row
+                          </Text>
+                        </Flex>
+                      </HStack>
+                    </Field.Root>
+                  </Grid>
+
+                  {/* Show Target Column(s) picker only when Chosen Columns is selected */}
+                  {isScopeSelectedColumns && (
+                    <Field.Root gap={0}>
+                      <Field.Label
+                        fontSize="xs"
+                        fontWeight="semibold"
+                        color="gray.600"
+                        mb={0.5}
+                      >
                         Target Column(s) (Style)
                       </Field.Label>
                       <MultiColumnSelect
@@ -232,7 +350,7 @@ export default function RuleCard({
                         }
                       />
                     </Field.Root>
-                  </Grid>
+                  )}
                 </>
               ) : (
                 <Grid templateColumns="repeat(2, 1fr)" gap={2} alignItems="end">
@@ -280,11 +398,31 @@ export default function RuleCard({
                   if (!details.checked) {
                     onUpdateRule(index, {
                       condition_column_name: undefined,
+                      highlight_scope: "cell",
+                      column_name:
+                        (rule.target_columns && rule.target_columns[0]) ||
+                        rule.column_name ||
+                        colNames[0] ||
+                        "",
                     });
                   } else {
+                    const currentCols =
+                      rule.target_columns && rule.target_columns.length > 0
+                        ? rule.target_columns
+                        : rule.column_name
+                          ? [rule.column_name]
+                          : colNames[0]
+                            ? [colNames[0]]
+                            : [];
                     onUpdateRule(index, {
                       condition_column_name:
                         rule.column_name || colNames[0] || "",
+                      target_columns: currentCols,
+                      column_name: currentCols.join(","),
+                      highlight_scope:
+                        rule.highlight_scope === "entire_row"
+                          ? "entire_row"
+                          : "selected_columns",
                     });
                   }
                 }}
