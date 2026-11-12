@@ -505,6 +505,25 @@ def _display_latest_run_status(
     return raw_status
 
 
+def pipeline_run_for_list_latest_status(pipeline_id: int):
+    """Run row that drives ``latest_run_status`` on the pipeline list (matches list API)."""
+    active = (
+        PipelineRun.objects.filter(
+            pipeline_id=pipeline_id,
+            status__in=('running', 'queued'),
+        )
+        .order_by('-id')
+        .first()
+    )
+    if active:
+        return active
+    return (
+        PipelineRun.objects.filter(pipeline_id=pipeline_id)
+        .order_by('-id')
+        .first()
+    )
+
+
 def _attach_pipeline_latest_run_statuses(pipelines) -> None:
     """Set ``latest_run_status`` on each pipeline for list serialization."""
     pipeline_list = list(pipelines)
@@ -995,6 +1014,7 @@ def _lock_pipeline_run_for_metadata(run: PipelineRun) -> PipelineRun:
 
 
 def _update_pipeline_run_metadata(run: PipelineRun, **updates) -> None:
+    capacity_touched = 'waiting_for_capacity' in updates
     with transaction.atomic():
         locked = _lock_pipeline_run_for_metadata(run)
         meta = _get_pipeline_run_metadata(locked)
@@ -1005,6 +1025,20 @@ def _update_pipeline_run_metadata(run: PipelineRun, **updates) -> None:
         locked.metadata = meta
         locked.save(update_fields=['metadata'])
         run.metadata = meta
+        if capacity_touched:
+
+            def _push_capacity_ui():
+                from apps.elttool.services.pipeline_run_ws_push import (
+                    schedule_pipeline_run_ws_push,
+                )
+
+                schedule_pipeline_run_ws_push(
+                    locked.id,
+                    locked.pipeline_id,
+                    force=True,
+                )
+
+            transaction.on_commit(_push_capacity_ui)
 
 
 def _set_pipeline_node_metadata(run: PipelineRun, node_id: int, **fields) -> None:
@@ -3178,11 +3212,19 @@ def _mark_pipeline_run_waiting_for_capacity(run_id: int) -> None:
 
 def _mark_pipeline_run_slot_acquired(run_id: int) -> None:
     """Move a capacity wait into running once this organisation has a free slot."""
-    updated = PipelineRun.objects.filter(id=run_id, status="queued").update(status="running")
-    if not updated:
-        return
-    run = PipelineRun.objects.get(id=run_id)
-    _update_pipeline_run_metadata(run, waiting_for_capacity=False)
+    with transaction.atomic():
+        run = (
+            PipelineRun.objects.select_for_update()
+            .filter(id=run_id, status="queued")
+            .first()
+        )
+        if not run:
+            return
+        meta = _get_pipeline_run_metadata(run)
+        meta["waiting_for_capacity"] = False
+        run.status = "running"
+        run.metadata = meta
+        run.save(update_fields=["status", "metadata"])
 
 
 def _resolve_pipeline_run_pod_budget(company) -> tuple[str, int, int, int]:

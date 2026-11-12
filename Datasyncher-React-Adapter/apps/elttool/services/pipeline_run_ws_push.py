@@ -44,9 +44,18 @@ def schedule_pipeline_run_ws_for_migration_session(migration_session_id: int) ->
     schedule_pipeline_run_ws_push(run_id, pipeline_id)
 
 
-def schedule_pipeline_run_ws_push(run_id: int, pipeline_id: int) -> None:
+def schedule_pipeline_run_ws_push(
+    run_id: int,
+    pipeline_id: int,
+    *,
+    force: bool = False,
+) -> None:
+    """Push run detail + list summary to pipeline-run WebSocket groups.
+
+    ``force=True`` bypasses debounce for status transitions (queued→running, terminal).
+    """
     debounce_key = _DEBOUNCE_KEY.format(run_id=run_id)
-    if cache.get(debounce_key):
+    if not force and cache.get(debounce_key):
         return
     cache.set(debounce_key, "1", timeout=_DEBOUNCE_SECONDS)
 
@@ -66,13 +75,19 @@ def _push_pipeline_run_ws_updates(run_id: int, pipeline_id: int) -> None:
     from apps.elttool.v1.pipeline_views import (
         _build_pipeline_run_detail,
         _build_pipeline_run_summary,
+        _display_latest_run_status,
+        _get_pipeline_run_metadata,
+        pipeline_run_for_list_latest_status,
     )
     from apps.elttool.websocket.ws_utils import (
+        push_company_pipeline_status_update,
         push_pipeline_run_status_update,
         push_pipeline_runs_list_update,
     )
 
-    run = PipelineRun.objects.select_related("pipeline").get(pk=run_id)
+    run = PipelineRun.objects.select_related("pipeline", "pipeline__cmp").get(
+        pk=run_id,
+    )
     detail = _build_pipeline_run_detail(run, include_migration_status=True)
     summary = _build_pipeline_run_summary(
         run,
@@ -80,3 +95,20 @@ def _push_pipeline_run_ws_updates(run_id: int, pipeline_id: int) -> None:
     )
     push_pipeline_run_status_update(run_id, detail)
     push_pipeline_runs_list_update(pipeline_id, summary)
+
+    list_run = pipeline_run_for_list_latest_status(pipeline_id)
+    if list_run and list_run.id == run_id:
+        cmp_id = getattr(run.pipeline, "cmp_id", None)
+        if cmp_id:
+            meta = _get_pipeline_run_metadata(run)
+            push_company_pipeline_status_update(
+                cmp_id,
+                {
+                    "pipeline_id": pipeline_id,
+                    "pipeline_run_id": run_id,
+                    "latest_run_status": _display_latest_run_status(
+                        run.status,
+                        meta,
+                    ),
+                },
+            )

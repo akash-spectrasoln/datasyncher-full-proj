@@ -6,18 +6,26 @@ from django.test import TestCase
 from django.utils import timezone
 
 from apps.elttool.models import (
+    BatchTable,
     Company,
     Connection,
     DestinationConfig,
     DestinationModel,
+    MigrationBatch,
     MigrationRecord,
     Pipeline,
+    PipelineNode,
     PipelineRun,
     Plan,
     Role,
     SourceConfig,
     SourceModel,
+    SourceTableSelection,
     User,
+)
+from apps.elttool.services.table_operation_guard import (
+    filter_tables_for_migration,
+    get_in_progress_table_names,
 )
 from apps.elttool.services.pipeline_run_revoke_service import revoke_pipeline_run
 from apps.elttool.tasks.pipeline_tasks import _TERMINAL_RUN_STATUSES
@@ -182,6 +190,67 @@ class PipelineRunRevokeTests(TestCase):
         self.assertIn("pipeline_run_42_node_7", names)
         _purge_job_orchestration_redis(mock_client, names)
         self.assertTrue(mock_client.delete.called)
+
+    @patch(
+        "apps.elttool.v1.pipeline_views._teardown_pipeline_flow_fleet",
+        autospec=True,
+    )
+    @patch(
+        "apps.elttool.services.pipeline_notifications.send_pipeline_flow_notification",
+        autospec=True,
+    )
+    def test_revoke_clears_table_selection_locks_for_batch_tables(
+        self, _notify, _teardown,
+    ):
+        batch = MigrationBatch.objects.create(
+            connection=self.connection,
+            name="Batch 1",
+            time_frequency="60",
+        )
+        BatchTable.objects.create(
+            batch=batch,
+            connection=self.connection,
+            table_name="Audience",
+        )
+        pipeline = Pipeline.objects.create(
+            cmp=self.company,
+            name="locks",
+            status="active",
+            created_by=self.user,
+        )
+        node = PipelineNode.objects.create(
+            pipeline=pipeline,
+            node_kind="batch",
+            connection=self.connection,
+            batch=batch,
+            order_index=0,
+        )
+        SourceTableSelection.objects.create(
+            connection=self.connection,
+            table="Audience",
+            status="in_progress",
+        )
+        run = PipelineRun.objects.create(
+            pipeline=pipeline,
+            status="running",
+            metadata={"nodes": {str(node.id): {"status": "running"}}},
+        )
+        with patch(
+            "apps.elttool.v1.pipeline_views._pipeline_run_participating_node_ids",
+            return_value=[node.id],
+        ):
+            result = revoke_pipeline_run(run)
+        self.assertEqual(result["status"], "revoked")
+        self.assertNotIn(
+            "Audience",
+            get_in_progress_table_names(self.connection),
+        )
+        runnable, skipped = filter_tables_for_migration(
+            self.connection,
+            ["Audience"],
+        )
+        self.assertEqual(skipped, [])
+        self.assertEqual(runnable, ["Audience"])
 
     def test_revoke_completed_run_is_noop(self):
         pipeline = Pipeline.objects.create(

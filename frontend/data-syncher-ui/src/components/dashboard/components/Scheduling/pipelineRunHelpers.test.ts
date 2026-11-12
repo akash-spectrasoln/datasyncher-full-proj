@@ -177,10 +177,11 @@ describe("pipelineRunHelpers", () => {
   });
 
   describe("pipelineRunRefetchInterval", () => {
-    it("polls every 2s while running or queued", () => {
-      expect(pipelineRunRefetchInterval("running")).toBe(2000);
+    it("polls faster while queued than while running", () => {
       expect(pipelineRunRefetchInterval("queued")).toBe(2000);
-      expect(pipelineRunRefetchInterval("in_progress")).toBe(2000);
+      expect(pipelineRunRefetchInterval("waiting")).toBe(2000);
+      expect(pipelineRunRefetchInterval("running")).toBe(5000);
+      expect(pipelineRunRefetchInterval("in_progress")).toBe(5000);
     });
 
     it("stops polling when run is terminal", () => {

@@ -191,6 +191,22 @@ def push_admin_ops_snapshot(payload):
     )
 
 
+def push_company_pipeline_status_update(cmp_id, payload):
+    """Notify Scheduling pipeline list pickers for this organisation."""
+    normalized_payload = dict(payload or {})
+    normalized_payload.setdefault("event", "pipeline_latest_run_status")
+    normalized_payload.setdefault("cmp_id", cmp_id)
+
+    channel_layer = get_channel_layer()
+    async_to_sync(channel_layer.group_send)(
+        f"company_pipeline_status_{cmp_id}",
+        {
+            "type": "company_pipeline_status_update",
+            "payload": normalized_payload,
+        },
+    )
+
+
 def push_company_connections_status_update(cmp_id, payload):
     """
     Push a company-level ping to all home-page listeners for this company.

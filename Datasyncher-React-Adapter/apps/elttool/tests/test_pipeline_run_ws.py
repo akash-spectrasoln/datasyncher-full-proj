@@ -5,6 +5,9 @@ from unittest.mock import AsyncMock, patch
 from django.test import SimpleTestCase, TestCase
 
 from apps.elttool.websocket.auth import user_owns_pipeline_run
+from apps.elttool.websocket.consumers.company_pipeline_status import (
+    CompanyPipelineStatusConsumer,
+)
 from apps.elttool.websocket.consumers.pipeline_run_status import (
     PipelineRunStatusConsumer,
 )
@@ -35,6 +38,28 @@ class UserOwnsPipelineRunTests(SimpleTestCase):
         )
         user = SimpleNamespace(is_authenticated=True, is_superuser=False)
         self.assertFalse(user_owns_pipeline_run(user, 99))
+
+
+class CompanyPipelineStatusConsumerAuthTests(unittest.IsolatedAsyncioTestCase):
+    @patch(
+        "apps.elttool.websocket.consumers.company_pipeline_status.user_belongs_to_company_async",
+        new_callable=AsyncMock,
+    )
+    @patch(
+        "apps.elttool.websocket.consumers.company_pipeline_status.authenticate_ws_user_async",
+        new_callable=AsyncMock,
+    )
+    async def test_connect_closes_4403_when_not_in_company(
+        self, mock_auth, mock_belongs,
+    ):
+        mock_auth.return_value = SimpleNamespace(is_authenticated=True)
+        mock_belongs.return_value = False
+        consumer = CompanyPipelineStatusConsumer()
+        consumer.scope = {"url_route": {"kwargs": {"cmp_id": "10"}}}
+        consumer.channel_name = "test_channel"
+        consumer.close = AsyncMock()
+        await consumer.connect()
+        consumer.close.assert_awaited_once_with(code=4403)
 
 
 class PipelineRunStatusConsumerAuthTests(unittest.IsolatedAsyncioTestCase):
@@ -93,8 +118,40 @@ class PipelineRunWsPushSignalTests(SimpleTestCase):
 
         instance = SimpleNamespace(id=5, pipeline_id=9)
         with self.captureOnCommitCallbacks(execute=True):
-            push_pipeline_run_ws_on_save(sender=PipelineRun, instance=instance)
-        mock_schedule.assert_called_once_with(5, 9)
+            push_pipeline_run_ws_on_save(
+                sender=PipelineRun,
+                instance=instance,
+                created=True,
+            )
+        mock_schedule.assert_called_once_with(5, 9, force=True)
+
+    @patch("apps.elttool.services.pipeline_run_ws_push.schedule_pipeline_run_ws_push")
+    def test_status_save_forces_push_past_debounce(self, mock_schedule):
+        from apps.elttool.models import PipelineRun
+        from apps.elttool.signals import push_pipeline_run_ws_on_save
+
+        instance = SimpleNamespace(id=5, pipeline_id=9)
+        with self.captureOnCommitCallbacks(execute=True):
+            push_pipeline_run_ws_on_save(
+                sender=PipelineRun,
+                instance=instance,
+                update_fields=["status", "metadata"],
+            )
+        mock_schedule.assert_called_once_with(5, 9, force=True)
+
+    @patch("apps.elttool.services.pipeline_run_ws_push.schedule_pipeline_run_ws_push")
+    def test_metadata_only_save_does_not_force(self, mock_schedule):
+        from apps.elttool.models import PipelineRun
+        from apps.elttool.signals import push_pipeline_run_ws_on_save
+
+        instance = SimpleNamespace(id=5, pipeline_id=9)
+        with self.captureOnCommitCallbacks(execute=True):
+            push_pipeline_run_ws_on_save(
+                sender=PipelineRun,
+                instance=instance,
+                update_fields=["metadata"],
+            )
+        mock_schedule.assert_called_once_with(5, 9, force=False)
 
 
 class MigrationRecordPipelineWsSignalTests(SimpleTestCase):

@@ -389,10 +389,12 @@ export function isLivePipelineRunStatus(
   );
 }
 
-/** Poll cadence while a run is queued/running (table progress is not on pipeline-run WS). */
-export const PIPELINE_RUN_LIVE_REFETCH_MS = 10_000;
-/** @deprecated Pipeline-run WS only fires on PipelineRun row saves; do not slow REST below live cadence. */
-export const PIPELINE_RUN_WS_FALLBACK_REFETCH_MS = 45_000;
+/** Fast poll while waiting for org flow capacity (queued→running). */
+export const PIPELINE_RUN_QUEUED_REFETCH_MS = 2_000;
+/** Poll while running (table progress is not on pipeline-run WS). */
+export const PIPELINE_RUN_RUNNING_REFETCH_MS = 5_000;
+/** Default when any pipeline may be live but run detail is not open. */
+export const PIPELINE_RUN_LIVE_REFETCH_MS = PIPELINE_RUN_QUEUED_REFETCH_MS;
 
 export function isApiThrottleError(error: unknown): boolean {
   if (!error || typeof error !== "object") return false;
@@ -407,7 +409,11 @@ export function isApiThrottleError(error: unknown): boolean {
 export function pipelineRunRefetchInterval(
   status: string | undefined,
 ): number | false {
-  if (isLivePipelineRunStatus(status)) return PIPELINE_RUN_LIVE_REFETCH_MS;
+  const s = (status || "").toLowerCase();
+  if (s === "queued" || s === "waiting") return PIPELINE_RUN_QUEUED_REFETCH_MS;
+  if (s === "running" || s === "in_progress") {
+    return PIPELINE_RUN_RUNNING_REFETCH_MS;
+  }
   return false;
 }
 

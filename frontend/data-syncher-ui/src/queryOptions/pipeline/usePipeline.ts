@@ -1,5 +1,5 @@
 import {
-  PIPELINE_RUN_LIVE_REFETCH_MS,
+  PIPELINE_RUN_QUEUED_REFETCH_MS,
   isApiThrottleError,
   isLivePipelineRunStatus,
   latestRunStatusForPicker,
@@ -41,12 +41,11 @@ type PipelineRunStatusSource = Pick<
   "status" | "overall" | "waiting_for_flow_slot"
 >;
 
-export function patchPipelineLatestRunStatusInCache(
+function applyLatestRunStatusToPipelinesCache(
   queryClient: QueryClient,
   pipelineId: number,
-  run: PipelineRunStatusSource,
+  latest_run_status: PipelineDetail["latest_run_status"],
 ) {
-  const latest_run_status = latestRunStatusForPicker(run);
   queryClient.setQueryData<PipelineDetail[]>(pipelinesQueryKey, (old) => {
     if (!old?.length) return old;
     let changed = false;
@@ -58,6 +57,30 @@ export function patchPipelineLatestRunStatusInCache(
     });
     return changed ? pipelines : old;
   });
+}
+
+export function patchPipelineLatestRunStatusInCache(
+  queryClient: QueryClient,
+  pipelineId: number,
+  run: PipelineRunStatusSource,
+) {
+  applyLatestRunStatusToPipelinesCache(
+    queryClient,
+    pipelineId,
+    latestRunStatusForPicker(run),
+  );
+}
+
+export function patchPipelineLatestRunStatusDirect(
+  queryClient: QueryClient,
+  pipelineId: number,
+  latest_run_status: PipelineDetail["latest_run_status"],
+) {
+  applyLatestRunStatusToPipelinesCache(
+    queryClient,
+    pipelineId,
+    latest_run_status,
+  );
 }
 
 function updatePipelineInCache(
@@ -135,10 +158,16 @@ export function usePipelines() {
       return data.pipelines ?? [];
     },
     staleTime: 15 * 1000,
-    // No WebSocket on the pipeline list — poll so picker badges (Live / Queued) stay current.
+    // Company pipeline WS patches badges; slow poll is fallback only.
     refetchInterval: (query) => {
       if (isQueryThrottled(query)) return false;
-      return PIPELINE_RUN_LIVE_REFETCH_MS;
+      const pipelines = query.state.data;
+      if (
+        pipelines?.some((p) => isLivePipelineRunStatus(p.latest_run_status))
+      ) {
+        return 60_000;
+      }
+      return 120_000;
     },
   });
 }
@@ -427,11 +456,15 @@ export function usePipelineRuns(pipelineId: number | null) {
     // "queued" after the worker has already started (no pipeline-run WebSocket).
     refetchInterval: (query) => {
       if (isQueryThrottled(query)) return false;
-      return query.state.data?.runs.some((run) =>
-        isLivePipelineRunStatus(resolvePipelineRunStatus(run)),
-      )
-        ? PIPELINE_RUN_LIVE_REFETCH_MS
-        : false;
+      const runs = query.state.data?.runs ?? [];
+      let interval: number | false = false;
+      for (const run of runs) {
+        const ms = pipelineRunRefetchInterval(resolvePipelineRunStatus(run));
+        if (ms && (interval === false || ms < interval)) {
+          interval = ms;
+        }
+      }
+      return interval;
     },
     staleTime: 15 * 1000,
   });
@@ -449,10 +482,6 @@ export function usePipelineRun(
   runId: number | null,
   _options?: { wsConnected?: boolean },
 ) {
-  // Pipeline-run WS pushes debounced run_detail on PipelineRun saves only (node/status
-  // transitions), not per-table MigrationRecord updates. Keep 10s REST while live.
-  const livePollMs = PIPELINE_RUN_LIVE_REFETCH_MS;
-
   return useQuery<PipelineRunDetail>({
     queryKey: pipelineRunQueryKey(pipelineId ?? 0, runId),
     queryFn: () => fetchPipelineRun(pipelineId!, runId!),
@@ -463,7 +492,7 @@ export function usePipelineRun(
         ? resolvePipelineRunStatus(query.state.data)
         : undefined;
       const live = pipelineRunRefetchInterval(status);
-      if (live) return livePollMs;
+      if (live) return live;
       // After the run ends, poll briefly so nested migration_status catches up
       // (tables may still show in_progress until the final fail rows are written).
       if (
@@ -471,7 +500,7 @@ export function usePipelineRun(
         ["failed", "completed", "timeout"].includes(status) &&
         Date.now() - query.state.dataUpdatedAt < 20_000
       ) {
-        return livePollMs;
+        return PIPELINE_RUN_QUEUED_REFETCH_MS;
       }
       return false;
     },

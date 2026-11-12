@@ -39,6 +39,74 @@ def _collect_run_job_names(run_id: int, nodes_meta: dict) -> set[str]:
     return names
 
 
+def _pipeline_run_tables_by_connection(
+    pipeline,
+    participating_node_ids: list[int],
+    *,
+    from_migration_rows: dict[int, set[str]] | None = None,
+) -> dict[int, set[str]]:
+    """All batch table names on participating nodes (+ any tables seen on migration rows)."""
+    from apps.elttool.models import PipelineNode
+
+    by_conn: dict[int, set[str]] = {}
+    if from_migration_rows:
+        for cid, names in from_migration_rows.items():
+            by_conn.setdefault(int(cid), set()).update(names)
+
+    if not participating_node_ids:
+        return by_conn
+
+    for node in (
+        PipelineNode.objects.filter(
+            pipeline_id=pipeline.id,
+            id__in=participating_node_ids,
+        )
+        .select_related("batch", "connection")
+        .iterator()
+    ):
+        cid = node.connection_id
+        batch = node.batch
+        if not cid or not batch:
+            continue
+        by_conn.setdefault(int(cid), set()).update(
+            batch.tables.values_list("table_name", flat=True),
+        )
+    return by_conn
+
+
+def _release_tables_after_pipeline_revoke(
+    job_prefix: str,
+    tables_by_connection: dict[int, set[str]],
+    *,
+    now,
+) -> None:
+    """Clear refresh/reload locks so the next pipeline run does not skip these tables."""
+    for connection_id, tables in tables_by_connection.items():
+        if not tables:
+            continue
+        table_list = list(tables)
+        MigrationRecord.objects.filter(
+            connection_id=connection_id,
+            table_name__in=table_list,
+            job_name__startswith=job_prefix,
+            status__in=_ACTIVE_LOAD_STATUSES,
+        ).update(status="revoked", updated_at=now)
+
+        for table in table_list:
+            other_active = MigrationRecord.objects.filter(
+                connection_id=connection_id,
+                table_name=table,
+                status__in=_ACTIVE_LOAD_STATUSES,
+            ).exclude(job_name__startswith=job_prefix)
+            if other_active.exists():
+                continue
+            SourceTableSelection.objects.filter(
+                connection_id=connection_id,
+                table=table,
+                status="in_progress",
+            ).update(status=None)
+
+
 def _purge_job_orchestration_redis(r, job_names: Iterable[str]) -> None:
     pending_prefix = os.getenv(
         "CELERY_FANOUT_PENDING_KEY_PREFIX", "celery:fanout-pending:"
@@ -179,20 +247,16 @@ def revoke_pipeline_run(
                 status="I",
             ).update(status="E", message=_FLOW_REVOKED_MESSAGE)
 
-        for connection_id, tables in connection_tables.items():
-            for table in tables:
-                still_active = MigrationRecord.objects.filter(
-                    connection_id=connection_id,
-                    table_name=table,
-                    status__in=_ACTIVE_LOAD_STATUSES,
-                ).exists()
-                if still_active:
-                    continue
-                SourceTableSelection.objects.filter(
-                    connection_id=connection_id,
-                    table=table,
-                    status="in_progress",
-                ).update(status=None)
+        tables_by_connection = _pipeline_run_tables_by_connection(
+            run.pipeline,
+            list(participating_ids),
+            from_migration_rows=connection_tables,
+        )
+        _release_tables_after_pipeline_revoke(
+            job_prefix,
+            tables_by_connection,
+            now=now,
+        )
 
         participating_keys = {str(nid) for nid in participating_ids}
         for node_id in participating_ids:

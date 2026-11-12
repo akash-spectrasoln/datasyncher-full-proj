@@ -132,16 +132,28 @@ def push_admin_ops_on_migration_status_change(sender, instance, **kwargs):
     transaction.on_commit(trigger_pipeline_run_ws)
 
 
+def _pipeline_run_ws_push_force(kwargs) -> bool:
+    """Status / lifecycle saves must not be dropped by metadata debounce."""
+    if kwargs.get("created"):
+        return True
+    update_fields = kwargs.get("update_fields")
+    if update_fields is None:
+        return True
+    fields = set(update_fields)
+    return bool(fields.intersection({"status", "finished_at"}))
+
+
 @receiver(post_save, sender=PipelineRun)
 def push_pipeline_run_ws_on_save(sender, instance, **kwargs):
     run_id = instance.id
     pipeline_id = instance.pipeline_id
+    force = _pipeline_run_ws_push_force(kwargs)
 
     def schedule_push():
         from apps.elttool.services.pipeline_run_ws_push import (
             schedule_pipeline_run_ws_push,
         )
 
-        schedule_pipeline_run_ws_push(run_id, pipeline_id)
+        schedule_pipeline_run_ws_push(run_id, pipeline_id, force=force)
 
     transaction.on_commit(schedule_push)

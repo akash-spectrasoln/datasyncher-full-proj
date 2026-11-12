@@ -6,6 +6,7 @@ from .consumers.connection_activity_log import ConnectionActivityLogConsumer
 from .consumers.company_connections_status import CompanyConnectionsStatusConsumer
 from .consumers.admin_ops import AdminOpsConsumer
 from .consumers.pipeline_run_status import PipelineRunStatusConsumer
+from .consumers.company_pipeline_status import CompanyPipelineStatusConsumer
 
 
 websocket_urlpatterns = [
@@ -36,5 +37,9 @@ websocket_urlpatterns = [
     re_path(
         r"^ws/pipeline_run/(?P<run_id>\d+)/$",
         PipelineRunStatusConsumer.as_asgi(),
+    ),
+    re_path(
+        r"^ws/company_pipeline_status/(?P<cmp_id>\d+)/$",
+        CompanyPipelineStatusConsumer.as_asgi(),
     ),
 ]
