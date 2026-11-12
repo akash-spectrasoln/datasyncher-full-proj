@@ -43,6 +43,13 @@ from services.sap.source import (
 logger = logging.getLogger(__name__)
 
 
+def _sts_str(value: Any) -> Optional[str]:
+    """Struct number_value becomes 1234.0 on the agent; send ids as strings."""
+    if value is None or value == "":
+        return None
+    return str(value)
+
+
 def _proxy_sts_update_details(
     *,
     job_name: Optional[str] = None,
@@ -53,22 +60,23 @@ def _proxy_sts_update_details(
     log_id: Optional[int] = None,
     session: Optional[int] = None,
 ) -> dict[str, Any]:
-    """STS blob for agent status (integers, not empty strings)."""
-    out: dict[str, Any] = {}
-    if job_name:
-        out["job_name"] = str(job_name)
-    if migration_session_id is not None:
-        out["migration_session_id"] = int(migration_session_id)
-    if connection_id is not None:
-        out["connection_id"] = int(connection_id)
-    if cmp_id is not None:
-        out["cmp_id"] = int(cmp_id)
-    if user_id is not None:
-        out["user_id"] = int(user_id)
-    if log_id is not None:
-        out["log_id"] = int(log_id)
-    if session is not None:
-        out["session"] = int(session)
+    """STS blob for the agent — all values are strings (working Django views).
+
+    google.protobuf.Struct stores Python ints as doubles; MessageToDict then
+    yields 1234.0. The agent expects string ids and coerces them itself.
+    """
+    out: dict[str, Any] = {"job_name": str(job_name or "")}
+    for key, raw in (
+        ("migration_session_id", migration_session_id),
+        ("connection_id", connection_id),
+        ("cmp_id", cmp_id),
+        ("user_id", user_id),
+        ("log_id", log_id),
+        ("session", session),
+    ):
+        text = _sts_str(raw)
+        if text is not None:
+            out[key] = text
     return out
 
 
@@ -110,7 +118,9 @@ def _get_proxy_credentials(
         raise ValueError("Proxy agent id is required when connection_method='proxy'.")
 
     host     = str(source_config.get("host") or "").strip()
-    username = str(source_config.get("username") or "").strip()
+    username = str(
+        source_config.get("username") or source_config.get("user") or ""
+    ).strip()
     password = str(source_config.get("password") or "").strip()
 
     port_value = source_config.get("port")
@@ -331,7 +341,10 @@ def _run_proxy_data_load(
         )
     ]
     source_conn      = _get_proxy_src_conn(source_config)
-    destination_type = str(source_config.get("destination_type") or "adls")
+    destination_type = _resolve_agent_destination_type(
+        source_config.get("destination_type") or "adls",
+        adls_config,
+    )
 
     details_for_sts_update = _proxy_sts_update_details(
         job_name=job_name,
@@ -343,13 +356,9 @@ def _run_proxy_data_load(
         session=session,
     )
 
-    agent_adls_config = dict(adls_config or {})
-    if agent_adls_config:
-        agent_adls_config["TENANT_ID"] = agent_adls_config.get("tenant_id", "")
-        agent_adls_config["CLIENT_ID"] = agent_adls_config.get("client_id", "")
-        agent_adls_config["CLIENT_SECRET"] = agent_adls_config.get("client_secret", "")
-        agent_adls_config["CONTAINER_NAME"] = agent_adls_config.get("container_name", "")
-        agent_adls_config["STORAGE_ACCOUNT_NAME"] = agent_adls_config.get("account_name") or agent_adls_config.get("storage_account_name", "")
+    agent_adls_config = _normalize_agent_destination_config(
+        destination_type, adls_config
+    )
 
     try:
         if use_delta_rpc:
@@ -436,22 +445,118 @@ def run_proxy_load_step(
 # Public proxy batch runner (all tables in a single gRPC call)
 # ---------------------------------------------------------------------------
 
+def _agent_cred_str(*values: Any, default: str = "") -> str:
+    """First non-empty credential value as a string (agent Struct fields are strings)."""
+    for value in values:
+        if value is None:
+            continue
+        text = str(value)
+        if text.strip() != "":
+            return text
+    return default
+
+
+def _resolve_agent_destination_type(
+    destination_type: str,
+    destination_config: Optional[Dict[str, Any]] = None,
+) -> str:
+    """Hub only accepts ``adls`` or ``snowflake`` (not Django dest model names)."""
+    raw = str(destination_type or "").strip().lower()
+    compact = raw.replace(" ", "").replace("_", "").replace("-", "")
+    if compact in {"adls", "azuredatalakestorage", "adlsgen2"} or "adls" in compact or "datalake" in compact:
+        return "adls"
+    if compact in {"snowflake", "sf"} or "snowflake" in compact:
+        return "snowflake"
+
+    cfg = destination_config or {}
+    if any(
+        cfg.get(key)
+        for key in (
+            "TENANT_ID",
+            "tenant_id",
+            "CONTAINER_NAME",
+            "container_name",
+            "STORAGE_ACCOUNT_NAME",
+            "storage_account_name",
+            "account_name",
+        )
+    ):
+        return "adls"
+    if any(cfg.get(key) for key in ("warehouse", "account")) and (
+        cfg.get("user") or cfg.get("username")
+    ):
+        return "snowflake"
+    return raw or "adls"
+
+
 def _normalize_agent_destination_config(
     destination_type: str,
     destination_config: Dict[str, Any],
 ) -> Dict[str, Any]:
-    """Shape destination credentials for the on-prem agent (ADLS key aliases only)."""
-    dest_type = str(destination_type or "adls").strip().lower()
-    agent_config = dict(destination_config or {})
+    """Shape destination credentials to the on-prem agent contract.
+
+    ADLS (odata_functions): TENANT_ID, CLIENT_ID, CLIENT_SECRET,
+    CONTAINER_NAME, STORAGE_ACCOUNT_NAME.
+
+    Snowflake (to_snowflake._get_snowflake_engine): account, username, password,
+    warehouse, database, schema, role, optional private_key / passphrase.
+    Django stores Snowflake login as ``user`` and often omits ``role``.
+    """
+    dest_type = _resolve_agent_destination_type(destination_type, destination_config)
+    raw = dict(destination_config or {})
+
     if dest_type == "adls":
-        agent_config["TENANT_ID"] = agent_config.get("tenant_id", "")
-        agent_config["CLIENT_ID"] = agent_config.get("client_id", "")
-        agent_config["CLIENT_SECRET"] = agent_config.get("client_secret", "")
-        agent_config["CONTAINER_NAME"] = agent_config.get("container_name", "")
-        agent_config["STORAGE_ACCOUNT_NAME"] = (
-            agent_config.get("account_name") or agent_config.get("storage_account_name", "")
+        return {
+            "TENANT_ID": _agent_cred_str(
+                raw.get("TENANT_ID"), raw.get("tenant_id")
+            ),
+            "CLIENT_ID": _agent_cred_str(
+                raw.get("CLIENT_ID"), raw.get("client_id")
+            ),
+            "CLIENT_SECRET": _agent_cred_str(
+                raw.get("CLIENT_SECRET"), raw.get("client_secret")
+            ),
+            "CONTAINER_NAME": _agent_cred_str(
+                raw.get("CONTAINER_NAME"), raw.get("container_name")
+            ),
+            "STORAGE_ACCOUNT_NAME": _agent_cred_str(
+                raw.get("STORAGE_ACCOUNT_NAME"),
+                raw.get("account_name"),
+                raw.get("storage_account_name"),
+            ),
+        }
+
+    if dest_type == "snowflake":
+        agent_config = {
+            "account": _agent_cred_str(raw.get("account")),
+            "username": _agent_cred_str(raw.get("username"), raw.get("user")),
+            "password": _agent_cred_str(raw.get("password")),
+            "warehouse": _agent_cred_str(raw.get("warehouse")),
+            "database": _agent_cred_str(raw.get("database")),
+            "schema": _agent_cred_str(
+                raw.get("schema"), raw.get("destination_schema")
+            ),
+            "role": _agent_cred_str(
+                raw.get("role"), default="ACCOUNTADMIN"
+            ),
+        }
+        private_key = _agent_cred_str(
+            raw.get("private_key"), raw.get("privateKey")
         )
-    return agent_config
+        if private_key:
+            agent_config["private_key"] = private_key
+            passphrase = _agent_cred_str(
+                raw.get("passphrase"), raw.get("private_key_passphrase")
+            )
+            if passphrase:
+                agent_config["passphrase"] = passphrase
+        return agent_config
+
+    return {
+        key: "" if value is None else str(value)
+        for key, value in raw.items()
+        if not isinstance(value, (dict, list))
+    }
 
 
 def _get_proxy_snowflake_source_payload(
@@ -528,11 +633,12 @@ def run_proxy_batch_load(
 
     proxy_agent, _, _, _, _ = _get_proxy_credentials(source_config)
     source_conn = _get_proxy_src_conn(source_config)
-    destination_type = str(
+    destination_type = _resolve_agent_destination_type(
         source_config.get("destination_type")
         or destination_config.get("destination_type")
-        or "adls"
-    ).strip().lower()
+        or "adls",
+        destination_config,
+    )
 
     agent_destination_config = _normalize_agent_destination_config(
         destination_type,

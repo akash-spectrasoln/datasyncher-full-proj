@@ -6,6 +6,31 @@ from sap_proxy_agent.client.channel_factory import get_channel, hub_grpc_call_ti
 from sap_proxy_agent.generated import service_pb2, service_pb2_grpc
 
 
+def _as_string_struct_dict(mapping):
+    """protobuf Struct stores ints as doubles (1234.0). Agent reads string values."""
+    out = {}
+    for key, value in dict(mapping or {}).items():
+        if isinstance(value, dict):
+            out[str(key)] = _as_string_struct_dict(value)
+        elif isinstance(value, list):
+            out[str(key)] = [
+                _as_string_struct_dict(item) if isinstance(item, dict)
+                else ("" if item is None else str(item))
+                for item in value
+            ]
+        elif value is None:
+            out[str(key)] = ""
+        else:
+            out[str(key)] = str(value)
+    return out
+
+
+def _struct_from_mapping(mapping):
+    struct = Struct()
+    struct.update(_as_string_struct_dict(mapping))
+    return struct
+
+
 def get_metadata(source_type, cust_id, url, source_config):
     channel = get_channel()
     stub = service_pb2_grpc.DatasynchorStub(channel)
@@ -39,11 +64,8 @@ def startdataload(
     channel = get_channel()
     stub = service_pb2_grpc.DatasynchorStub(channel)
 
-    destination_config_struct = Struct()
-    destination_config_struct.update(destination_config)
-
-    details_for_sts_update_struct = Struct()
-    details_for_sts_update_struct.update(details_for_sts_update)
+    destination_config_struct = _struct_from_mapping(destination_config)
+    details_for_sts_update_struct = _struct_from_mapping(details_for_sts_update)
 
     request_kwargs = {
         "cust_id": cust_id,
@@ -129,11 +151,8 @@ def delta_load(
 ):
     channel = get_channel()
     stub = service_pb2_grpc.DatasynchorStub(channel)
-    destination_config_struct = Struct()
-    destination_config_struct.update(destination_config)
-
-    details_for_sts_update_struct = Struct()
-    details_for_sts_update_struct.update(details_for_sts_update)
+    destination_config_struct = _struct_from_mapping(destination_config)
+    details_for_sts_update_struct = _struct_from_mapping(details_for_sts_update)
 
     request = service_pb2.TriggerDeltaRequest(
         cust_id=cust_id,

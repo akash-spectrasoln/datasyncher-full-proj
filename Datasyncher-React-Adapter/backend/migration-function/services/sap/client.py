@@ -182,7 +182,7 @@ def _parse_connection_fields(config: dict[str, Any]) -> tuple[str, int, str, str
 
     host              = str(config.get("host")              or "").strip()
     port_raw          = config.get("port")
-    username          = str(config.get("username")          or "").strip()
+    username          = str(config.get("username") or config.get("user") or "").strip()
     password          = str(config.get("password")          or "").strip()
     connection_method = str(config.get("connection_method") or "direct").strip().lower()
 
